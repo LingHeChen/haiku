@@ -133,7 +133,10 @@ Values are automatically inferred:
 | `age 25` | int | `25` |
 | `score 98.5` | float | `98.5` |
 | `active true` | bool | `true` |
+| `note _` | null | `null` |
 | `note null` | null | `null` |
+| `tags []` | empty array | `[]` |
+| `meta {}` | empty object | `{}` |
 | `name "John Smith"` | string | `"John Smith"` |
 
 ## Quoting Rules

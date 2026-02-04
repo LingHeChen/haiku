@@ -30,11 +30,13 @@ type Entry struct {
 
 // Value 表示配置值，支持多种类型
 type Value struct {
-	String *QuotedString `parser:"  @String"`
-	Float  *float64      `parser:"| @Float"`
-	Int    *int64        `parser:"| @Int"`
-	Bool   *Boolean      `parser:"| @('true' | 'false')"`
-	Raw    *string       `parser:"| @Ident"` // 处理无引号字符串
+	String      *QuotedString `parser:"  @String"`
+	Float       *float64      `parser:"| @Float"`
+	Int         *int64        `parser:"| @Int"`
+	Bool        *Boolean      `parser:"| @('true' | 'false')"`
+	EmptyArray  *string       `parser:"| @EmptyArray"`  // 空数组 []
+	EmptyObject *string       `parser:"| @EmptyObject"` // 空对象 {}
+	Raw         *string       `parser:"| @Ident"`       // 处理无引号字符串
 
 	// 嵌套结构：预处理会把缩进变成 { ... }
 	Block *Config `parser:"| '{' @@ '}'"`
@@ -121,7 +123,17 @@ func (v *Value) MarshalJSON() ([]byte, error) {
 	if v.Bool != nil {
 		return json.Marshal(v.Bool)
 	}
+	if v.EmptyArray != nil {
+		return []byte("[]"), nil
+	}
+	if v.EmptyObject != nil {
+		return []byte("{}"), nil
+	}
 	if v.Raw != nil {
+		// 处理 _ 作为 null
+		if *v.Raw == "_" {
+			return []byte("null"), nil
+		}
 		return json.Marshal(v.Raw)
 	}
 	if v.Block != nil {
@@ -296,6 +308,8 @@ var haikuLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"`},
 	{Name: "Float", Pattern: `\d+\.\d+`},
 	{Name: "Int", Pattern: `\d+`},
+	{Name: "EmptyArray", Pattern: `\[\]`},   // 空数组
+	{Name: "EmptyObject", Pattern: `\{\}`},  // 空对象
 	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_-]*`}, // 支持连字符
 	{Name: "Punct", Pattern: `[{};]`},
 	{Name: "Whitespace", Pattern: `[ \t]+`},
@@ -423,6 +437,12 @@ func (v *Value) ToInterface() interface{} {
 	if v.Bool != nil {
 		return bool(*v.Bool)
 	}
+	if v.EmptyArray != nil {
+		return []interface{}{}
+	}
+	if v.EmptyObject != nil {
+		return map[string]interface{}{}
+	}
 	if v.Raw != nil {
 		// 智能类型推断
 		return inferType(*v.Raw)
@@ -457,8 +477,8 @@ func inferType(s string) interface{} {
 		return false
 	}
 
-	// 尝试 null
-	if s == "null" || s == "nil" {
+	// 尝试 null（支持 _, null, nil）
+	if s == "_" || s == "null" || s == "nil" {
 		return nil
 	}
 
