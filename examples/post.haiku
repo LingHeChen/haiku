@@ -1,0 +1,17 @@
+post "https://httpbin.org/post"
+headers
+  Content-Type "application/json"
+body
+  name John
+  age 25
+  score 98.5
+  active true
+  deleted false
+  note null
+  tags
+    api
+    http
+    100
+  address
+    city Beijing
+    zip 100000

@@ -1,0 +1,11 @@
+# 变量定义（无需等号）
+@base_url "https://httpbin.org"
+@token "Bearer my-secret-token"
+@user_id 123
+
+# 使用变量
+get "{{base_url}}/get"
+headers
+  Authorization "{{token}}"
+  X-User-Id "{{user_id}}"
+  X-Home "{{$HOME}}"

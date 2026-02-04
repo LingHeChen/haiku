@@ -1,0 +1,4 @@
+get "https://httpbin.org/get"
+headers
+  Accept "application/json"
+  User-Agent "haiku/0.1"

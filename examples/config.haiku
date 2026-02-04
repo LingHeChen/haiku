@@ -1,0 +1,4 @@
+# 公共配置 - 可被其他文件 import
+@base_url "https://httpbin.org"
+@token "Bearer my-secret-token"
+@content_type "application/json"

@@ -1,0 +1,11 @@
+# 导入公共配置
+import "config.haiku"
+
+# 本地变量（可覆盖导入的）
+@user_id 456
+
+get "{{base_url}}/get"
+headers
+  Authorization "{{token}}"
+  Content-Type "{{content_type}}"
+  X-User-Id "{{user_id}}"
