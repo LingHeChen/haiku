@@ -611,18 +611,28 @@ func toJSONString(v interface{}) string {
 	}
 }
 
+// ExtractVariables 从整个输入中提取变量（包括 import）
+// 用于在分割请求之前提取全局变量
+func ExtractVariables(input string, basePath string) map[string]string {
+	return extractVariablesWithImports(input, basePath)
+}
+
 // ParseToMapWithResponse 解析请求，支持上一个响应的引用
 func (p *Parser) ParseToMapWithResponse(input string, basePath string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
-	// 1. 提取变量（支持 import）
+	// 从当前请求块提取变量
 	vars := extractVariablesWithImports(input, basePath)
+	return p.ParseToMapWithVars(input, vars, prevResponse)
+}
 
-	// 2. 替换变量引用（包含响应引用）
+// ParseToMapWithVars 解析请求，使用预先提取的变量
+func (p *Parser) ParseToMapWithVars(input string, vars map[string]string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
+	// 1. 替换变量引用（包含响应引用）
 	input = substituteVariablesWithResponse(input, vars, prevResponse)
 
-	// 3. 预处理（缩进 → 大括号）
+	// 2. 预处理（缩进 → 大括号）
 	bracedCode := preprocess(input)
 
-	// 4. 解析
+	// 3. 解析
 	config, err := p.parser.ParseString("", bracedCode)
 	if err != nil {
 		return nil, err
