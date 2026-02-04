@@ -580,63 +580,6 @@ func getNestedValue(data interface{}, path string) interface{} {
 	return current
 }
 
-// toJSONString 将值转换为字符串（用于变量替换）
-// 如果值包含特殊字符，会自动添加引号
-func toJSONString(v interface{}) string {
-	if v == nil {
-		return "null"
-	}
-	
-	switch val := v.(type) {
-	case string:
-		// 如果字符串包含特殊字符（空格、冒号、引号等），需要用引号包围
-		if needsQuoting(val) {
-			// 转义内部引号并用引号包围
-			escaped := strings.ReplaceAll(val, `"`, `\"`)
-			return `"` + escaped + `"`
-		}
-		return val
-	case float64:
-		// 整数显示为整数
-		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10)
-		}
-		return strconv.FormatFloat(val, 'f', -1, 64)
-	case int64:
-		return strconv.FormatInt(val, 10)
-	case bool:
-		if val {
-			return "true"
-		}
-		return "false"
-	default:
-		// 复杂类型转 JSON，用引号包围
-		if jsonBytes, err := json.Marshal(val); err == nil {
-			escaped := strings.ReplaceAll(string(jsonBytes), `"`, `\"`)
-			return `"` + escaped + `"`
-		}
-		return ""
-	}
-}
-
-// needsQuoting 检查字符串是否需要引号
-func needsQuoting(s string) bool {
-	if s == "" {
-		return true
-	}
-	// 包含空格、冒号、引号、换行等特殊字符时需要引号
-	for _, c := range s {
-		if c == ' ' || c == ':' || c == '"' || c == '\n' || c == '\t' || c == '{' || c == '}' || c == '[' || c == ']' {
-			return true
-		}
-	}
-	// URL 需要引号
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		return true
-	}
-	return false
-}
-
 // ExtractVariables 从整个输入中提取变量（包括 import）
 // 用于在分割请求之前提取全局变量
 func ExtractVariables(input string, basePath string) map[string]string {
@@ -652,8 +595,8 @@ func (p *Parser) ParseToMapWithResponse(input string, basePath string, prevRespo
 
 // ParseToMapWithVars 解析请求，使用预先提取的变量
 func (p *Parser) ParseToMapWithVars(input string, vars map[string]string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
-	// 1. 替换变量引用（包含响应引用）
-	input = substituteVariablesWithResponse(input, vars, prevResponse)
+	// 1. 替换变量引用（不替换 $_ 响应引用，留到后面处理）
+	input = substituteVariablesOnly(input, vars)
 
 	// 2. 预处理（缩进 → 大括号）
 	bracedCode := preprocess(input)
@@ -664,11 +607,19 @@ func (p *Parser) ParseToMapWithVars(input string, vars map[string]string, prevRe
 		return nil, err
 	}
 
-	return config.ToMap(), nil
+	// 4. 转换为 Map
+	result := config.ToMap()
+
+	// 5. 在 Map 级别替换 $_ 响应引用（保留 JSON 结构）
+	if prevResponse != nil {
+		result = substituteResponseInMap(result, prevResponse).(map[string]interface{})
+	}
+
+	return result, nil
 }
 
-// substituteVariablesWithResponse 替换变量，支持响应引用
-func substituteVariablesWithResponse(input string, vars map[string]string, prevResponse map[string]interface{}) string {
+// substituteVariablesOnly 只替换普通变量和环境变量，不处理 $_ 响应引用
+func substituteVariablesOnly(input string, vars map[string]string) string {
 	// 先处理旧语法 {{var}} 和 {{$ENV}}（兼容）
 	input = legacyVarRefRegex.ReplaceAllStringFunc(input, func(match string) string {
 		name := match[2 : len(match)-2]
@@ -689,28 +640,13 @@ func substituteVariablesWithResponse(input string, vars map[string]string, prevR
 		return match
 	})
 
-	// 处理新语法 $var, $env.VAR, $_.field
+	// 处理新语法 $var, $env.VAR（但不处理 $_）
 	input = varRefRegex.ReplaceAllStringFunc(input, func(match string) string {
 		name := match[1:] // 去掉 $
 
-		// 响应引用: $_ 或 $_.field
+		// 响应引用 $_ 保留不替换，留到 Map 级别处理
 		if strings.HasPrefix(name, "_") {
-			if prevResponse == nil {
-				return match // 没有上一个响应，保留原样
-			}
-			
-			if name == "_" {
-				// $_ 返回整个响应的 JSON
-				return toJSONString(prevResponse)
-			}
-			
-			// $_.field.subfield
-			path := name[2:] // 去掉 "_."
-			value := getNestedValue(prevResponse, path)
-			if value == nil {
-				return match // 字段不存在，保留原样
-			}
-			return toJSONString(value)
+			return match
 		}
 
 		// 环境变量引用: $env.VAR
@@ -731,4 +667,54 @@ func substituteVariablesWithResponse(input string, vars map[string]string, prevR
 	})
 
 	return input
+}
+
+// substituteResponseInMap 在 Map 级别替换 $_ 响应引用
+func substituteResponseInMap(v interface{}, prevResponse map[string]interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			result[k] = substituteResponseInMap(v, prevResponse)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, v := range val {
+			result[i] = substituteResponseInMap(v, prevResponse)
+		}
+		return result
+	case string:
+		// 检查是否是 $_ 引用
+		if strings.HasPrefix(val, "$_") {
+			return resolveResponseRef(val, prevResponse)
+		}
+		return val
+	default:
+		return val
+	}
+}
+
+// resolveResponseRef 解析 $_ 引用并返回实际值
+func resolveResponseRef(ref string, prevResponse map[string]interface{}) interface{} {
+	if prevResponse == nil {
+		return ref
+	}
+
+	// $_ 返回整个响应
+	if ref == "$_" {
+		return prevResponse
+	}
+
+	// $_.field.subfield 返回嵌套字段
+	if strings.HasPrefix(ref, "$_.") {
+		path := ref[3:] // 去掉 "$_."
+		value := getNestedValue(prevResponse, path)
+		if value != nil {
+			return value
+		}
+	}
+
+	// 未找到，返回原值
+	return ref
 }
