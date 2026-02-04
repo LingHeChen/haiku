@@ -208,8 +208,11 @@ func preprocess(input string) string {
 // 变量定义正则: @name "value" 或 @name value（等号可选）
 var varDefRegex = regexp.MustCompile(`^\s*@(\w+)\s*=?\s*"?([^"]*)"?\s*$`)
 
-// 变量引用正则: {{name}} 或 {{$ENV_VAR}}
-var varRefRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+// 新变量引用正则: $var, $env.VAR, $_.field
+var varRefRegex = regexp.MustCompile(`\$(\w+(?:\.\w+)*)`)
+
+// 旧变量引用正则（兼容）: {{name}} 或 {{$ENV_VAR}}
+var legacyVarRefRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 
 // import 正则: import "filename"
 var importRegex = regexp.MustCompile(`^\s*import\s+"([^"]+)"`)
@@ -276,7 +279,8 @@ func dirPath(filePath string) string {
 
 // substituteVariables 替换输入中的变量引用
 func substituteVariables(input string, vars map[string]string) string {
-	return varRefRegex.ReplaceAllStringFunc(input, func(match string) string {
+	// 先处理旧语法 {{var}} 和 {{$ENV}}（兼容）
+	input = legacyVarRefRegex.ReplaceAllStringFunc(input, func(match string) string {
 		// 提取变量名 (去掉 {{ 和 }})
 		name := match[2 : len(match)-2]
 		name = strings.TrimSpace(name)
@@ -298,6 +302,37 @@ func substituteVariables(input string, vars map[string]string) string {
 		// 未找到，保留原样
 		return match
 	})
+
+	// 处理新语法 $var, $env.VAR
+	input = varRefRegex.ReplaceAllStringFunc(input, func(match string) string {
+		// 提取变量名 (去掉 $)
+		name := match[1:]
+
+		// 环境变量引用: $env.VAR
+		if strings.HasPrefix(name, "env.") {
+			envName := name[4:] // 去掉 "env."
+			if val := os.Getenv(envName); val != "" {
+				return val
+			}
+			return match // 保留原样
+		}
+
+		// 上一个响应引用: $_.field（预留，暂不实现）
+		if strings.HasPrefix(name, "_") {
+			// TODO: 实现响应链式引用
+			return match
+		}
+
+		// 普通变量
+		if val, ok := vars[name]; ok {
+			return val
+		}
+
+		// 未找到，保留原样
+		return match
+	})
+
+	return input
 }
 
 // ---------------------------------------------------------

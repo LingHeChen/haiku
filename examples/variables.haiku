@@ -3,9 +3,9 @@
 @token "Bearer my-secret-token"
 @user_id 123
 
-# 使用变量
-get "{{base_url}}/get"
+# 使用变量（新语法 $var）
+get "$base_url/get"
 headers
-  Authorization "{{token}}"
-  X-User-Id "{{user_id}}"
-  X-Home "{{$HOME}}"
+  Authorization "$token"
+  X-User-Id "$user_id"
+  X-Home "$env.HOME"

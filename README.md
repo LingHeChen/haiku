@@ -91,10 +91,10 @@ body
 @base_url "https://api.example.com"
 @token "Bearer xxx"
 
-# Use variables
-get "{{base_url}}/users"
+# Use variables with $var syntax
+get "$base_url/users"
 headers
-  Authorization "{{token}}"
+  Authorization "$token"
 ```
 
 ### Environment Variables
@@ -102,9 +102,11 @@ headers
 ```haiku
 get "https://api.example.com/users"
 headers
-  Authorization "{{$API_TOKEN}}"
-  X-Home "{{$HOME}}"
+  Authorization "$env.API_TOKEN"
+  X-Home "$env.HOME"
 ```
+
+> **Note**: Legacy syntax `{{var}}` and `{{$ENV}}` is still supported for backward compatibility.
 
 ### Import
 
@@ -118,9 +120,9 @@ headers
 # request.haiku
 import "config.haiku"
 
-get "{{base_url}}/users"
+get "$base_url/users"
 headers
-  Authorization "{{token}}"
+  Authorization "$token"
 ```
 
 ## Type Inference
@@ -154,6 +156,48 @@ Values are automatically inferred:
 ## HTTP Methods
 
 Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
+
+## Roadmap
+
+### Syntax Simplification
+
+- [x] Shorter variable syntax: `$var` instead of `{{var}}`
+- [x] Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
+- [ ] URL without quotes: `get https://api.com` instead of `get "https://api.com"`
+- [ ] Auto-detect method: no body = GET, has body = POST
+- [ ] Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
+- [ ] Remove `headers`/`body` keywords - use `>` prefix for headers
+
+### Request Features
+
+- [ ] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
+- [ ] Retry with backoff
+- [ ] Timeout configuration
+- [ ] Follow redirects option
+- [ ] Proxy support
+- [ ] Cookie jar
+
+### Response Handling
+
+- [ ] Response assertions: `expect status 200`, `expect body.id exists`
+- [ ] Save response to variable: `@user_id = response.id`
+- [ ] Output formatting: `--output json|yaml|table`
+- [ ] Save response to file
+
+### Testing & Automation
+
+- [ ] Test mode: run multiple requests as test suite
+- [ ] Mock server: serve responses defined in .haiku files
+- [ ] Request diff: compare responses between environments
+- [ ] Generate .haiku from curl command
+- [ ] Generate .haiku from OpenAPI/Swagger spec
+
+### Developer Experience
+
+- [ ] VS Code extension with syntax highlighting
+- [ ] Watch mode: re-run on file change
+- [ ] Interactive mode (REPL)
+- [ ] Verbose/debug output
 
 ## License
 
