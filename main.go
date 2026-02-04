@@ -144,13 +144,31 @@ func showParsed(input string, basePath string) {
 		fatal("初始化解析器失败: %v", err)
 	}
 
-	mapData, err := p.ParseToMapWithBasePath(input, basePath)
-	if err != nil {
-		fatal("解析错误: %v", err)
-	}
+	// 分割多个请求
+	requests := parser.SplitRequests(input)
+	
+	var prevResponse map[string]interface{}
+	
+	for i, reqInput := range requests {
+		if len(requests) > 1 {
+			fmt.Printf("--- Request %d ---\n", i+1)
+		}
+		
+		mapData, err := p.ParseToMapWithResponse(reqInput, basePath, prevResponse)
+		if err != nil {
+			fatal("解析错误: %v", err)
+		}
 
-	jsonBytes, _ := json.MarshalIndent(mapData, "", "  ")
-	fmt.Println(string(jsonBytes))
+		jsonBytes, _ := json.MarshalIndent(mapData, "", "  ")
+		fmt.Println(string(jsonBytes))
+		
+		// 模拟响应（parse-only 模式没有真实响应）
+		prevResponse = mapData
+		
+		if len(requests) > 1 && i < len(requests)-1 {
+			fmt.Println()
+		}
+	}
 }
 
 func execute(input string, basePath string) {
