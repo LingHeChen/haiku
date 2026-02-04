@@ -1,8 +1,16 @@
 # Haiku
 
-A human-friendly HTTP client with simplified syntax for request bodies.
+A minimalist HTTP client that lets you write less and do more.
 
-## Why?
+## Features
+
+- **Indentation-based body** - No more `{}`, `,`, or `"` noise
+- **Auto type inference** - `age 25` becomes `25`, not `"25"`
+- **Request chaining** - `$_.token` references previous response
+- **Unified variables** - `$var` for local, `$env.HOME` for environment
+- **Shorthand values** - `_` for null, `[]` for empty array, `{}` for empty object
+
+## Why Haiku?
 
 Writing JSON by hand is tedious:
 
@@ -27,6 +35,15 @@ body
     zip 100000
 '
 ```
+
+### Comparison
+
+| Feature | Haiku | curl | HTTPie |
+|---------|-------|------|--------|
+| Nested JSON body | `address`<br>`  city Beijing` | `-d '{"address":{"city":"Beijing"}}'` | `address:='{"city":"Beijing"}'` |
+| Type inference | `age 25` → number | manual | `age:=25` |
+| Request chaining | `$_.token` | shell scripts | not supported |
+| Variables | `$var`, `$env.HOME` | shell only | not supported |
 
 ## Installation
 

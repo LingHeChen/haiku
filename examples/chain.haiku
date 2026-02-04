@@ -1,16 +1,27 @@
+@base_url "https://httpbin.org"
+
 # 链式请求示例
 # 使用 --- 分隔多个请求
 # 使用 $_ 引用上一个响应
 
 # 第一个请求：获取 IP
-get "https://httpbin.org/ip"
+get "$base_url/ip"
 
 ---
 
 # 第二个请求：将上一个响应作为 body 发送
-post "https://httpbin.org/post"
+post "$base_url/post"
 headers
   Content-Type "application/json"
 body
   previous_ip "$_.origin"
   message "My IP is $_.origin"
+
+---
+
+# 第二个请求：将上一个响应作为 body 发送
+post "$base_url/post"
+headers
+  Content-Type "application/json"
+body
+  message "$_.json.message"
