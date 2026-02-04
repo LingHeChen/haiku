@@ -14,6 +14,16 @@ import (
 
 const version = "0.1.0"
 
+// 输出选项
+var (
+	outputFile string // -o file.json
+	quietMode  bool   // -q / --quiet
+	bodyOnly   bool   // --body-only
+)
+
+// 输出长度限制
+const maxBodyLines = 50
+
 const usage = `haiku - 人类友好的 HTTP 客户端
 
 用法:
@@ -22,6 +32,11 @@ const usage = `haiku - 人类友好的 HTTP 客户端
   haiku -                     从 stdin 读取
   haiku -e '<request>'        执行内联请求
   haiku -h                    显示帮助
+
+选项:
+  -o <file>      保存响应到文件
+  -q, --quiet    静默模式，只显示状态码和耗时
+  --body-only    只输出 body（方便管道处理）
 
 示例:
   # 执行文件
@@ -33,6 +48,12 @@ const usage = `haiku - 人类友好的 HTTP 客户端
   # 内联请求
   haiku -e 'get "https://httpbin.org/get"'
 
+  # 保存响应到文件
+  haiku api/get-users.haiku -o response.json
+
+  # 只显示状态
+  haiku api/get-users.haiku -q
+
 文件格式 (.haiku):
   # 导入其他文件的变量
   import "config.haiku"
@@ -42,15 +63,15 @@ const usage = `haiku - 人类友好的 HTTP 客户端
   @token "Bearer xxx"
 
   # 请求（使用变量）
-  get "{{base_url}}/users"
+  get "$base_url/users"
   headers
     Accept "application/json"
-    Authorization "{{token}}"
-    X-Home "{{$HOME}}"          # 环境变量用 $
+    Authorization "$token"
+    X-Home "$env.HOME"
   body
     name John
-    age 25                      # 自动推断为数字
-    active true                 # 自动推断为布尔
+    age 25
+    active true
     tags
       api
       http
@@ -83,6 +104,21 @@ func main() {
 		case "-p", "--parse":
 			parseOnly = true
 			i++
+
+		case "-q", "--quiet":
+			quietMode = true
+			i++
+
+		case "--body-only":
+			bodyOnly = true
+			i++
+
+		case "-o":
+			if i+1 >= len(args) {
+				fatal("错误: -o 需要文件名参数")
+			}
+			outputFile = args[i+1]
+			i += 2
 
 		case "-e":
 			if i+1 >= len(args) {
@@ -188,11 +224,12 @@ func execute(input string, basePath string) {
 	requests := parser.SplitRequests(input)
 	
 	var prevResponse map[string]interface{}
+	var lastResp *request.Response
 	totalStart := time.Now()
 
 	for i, reqInput := range requests {
-		// 如果有多个请求，显示序号
-		if len(requests) > 1 {
+		// 如果有多个请求，显示序号（非静默模式）
+		if len(requests) > 1 && !quietMode && !bodyOnly {
 			fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
 		}
 
@@ -215,20 +252,57 @@ func execute(input string, basePath string) {
 
 		// 保存响应用于下一个请求
 		prevResponse, _ = resp.JSON()
+		lastResp = resp
 		
 		// 如果有多个请求，添加分隔
-		if len(requests) > 1 && i < len(requests)-1 {
+		if len(requests) > 1 && i < len(requests)-1 && !quietMode && !bodyOnly {
 			fmt.Println()
 		}
 	}
 
 	// 如果有多个请求，显示总耗时
-	if len(requests) > 1 {
+	if len(requests) > 1 && !quietMode && !bodyOnly {
 		fmt.Printf("\n\033[2mTotal: %d requests in %v\033[0m\n", len(requests), time.Since(totalStart).Round(time.Millisecond))
+	}
+
+	// 保存到文件（只保存最后一个响应）
+	if outputFile != "" && lastResp != nil {
+		saveToFile(lastResp)
+	}
+}
+
+// saveToFile 保存响应到文件
+func saveToFile(resp *request.Response) {
+	var content []byte
+	
+	// 尝试格式化 JSON
+	if jsonData, err := resp.JSON(); err == nil {
+		content, _ = json.MarshalIndent(jsonData, "", "  ")
+	} else {
+		content = resp.Body
+	}
+	
+	if err := os.WriteFile(outputFile, content, 0644); err != nil {
+		fatal("保存文件失败: %v", err)
+	}
+	
+	if !quietMode && !bodyOnly {
+		fmt.Printf("\033[2m响应已保存到 %s\033[0m\n", outputFile)
 	}
 }
 
 func printResponse(resp *request.Response, totalTime time.Duration) {
+	// body-only 模式：只输出原始 body
+	if bodyOnly {
+		if jsonData, err := resp.JSON(); err == nil {
+			formatted, _ := json.MarshalIndent(jsonData, "", "  ")
+			fmt.Println(string(formatted))
+		} else {
+			fmt.Println(resp.String())
+		}
+		return
+	}
+
 	// 颜色码
 	reset := "\033[0m"
 	bold := "\033[1m"
@@ -250,6 +324,12 @@ func printResponse(resp *request.Response, totalTime time.Duration) {
 	fmt.Printf("%s%s%s %s(%v)%s\n", 
 		statusColor, resp.Status, reset,
 		dim, resp.Duration.Round(time.Millisecond), reset)
+
+	// quiet 模式：只显示状态行
+	if quietMode {
+		return
+	}
+
 	fmt.Println(dim + strings.Repeat("─", 50) + reset)
 
 	// Headers
@@ -261,15 +341,59 @@ func printResponse(resp *request.Response, totalTime time.Duration) {
 
 	// Body
 	fmt.Printf("%s%sBody%s\n", bold, cyan, reset)
-	body := resp.String()
 	
 	// 尝试格式化 JSON
 	if jsonData, err := resp.JSON(); err == nil {
-		if formatted, err := json.MarshalIndent(jsonData, "", "  "); err == nil {
-			body = string(formatted)
+		body := formatJSONWithLimit(jsonData)
+		fmt.Println(body)
+	} else {
+		body := resp.String()
+		lines := strings.Split(body, "\n")
+		if len(lines) > maxBodyLines {
+			fmt.Println(strings.Join(lines[:maxBodyLines], "\n"))
+			fmt.Printf("%s... (%d more lines, use -o to save full response)%s\n", dim, len(lines)-maxBodyLines, reset)
+		} else {
+			fmt.Println(body)
 		}
 	}
-	fmt.Println(body)
+}
+
+// formatJSONWithLimit 格式化 JSON，如果太长则只显示顶层结构
+func formatJSONWithLimit(data map[string]interface{}) string {
+	// 先尝试完整格式化
+	formatted, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", data)
+	}
+	
+	lines := strings.Split(string(formatted), "\n")
+	
+	// 如果行数在限制内，返回完整内容
+	if len(lines) <= maxBodyLines {
+		return string(formatted)
+	}
+	
+	// 太长了，只显示顶层结构
+	summary := make(map[string]interface{})
+	for k, v := range data {
+		switch val := v.(type) {
+		case map[string]interface{}:
+			summary[k] = fmt.Sprintf("{...} (%d keys)", len(val))
+		case []interface{}:
+			summary[k] = fmt.Sprintf("[...] (%d items)", len(val))
+		case string:
+			if len(val) > 100 {
+				summary[k] = val[:100] + "..."
+			} else {
+				summary[k] = val
+			}
+		default:
+			summary[k] = v
+		}
+	}
+	
+	summaryJSON, _ := json.MarshalIndent(summary, "", "  ")
+	return string(summaryJSON) + "\n\033[2m... (response too long, use -o to save full response)\033[0m"
 }
 
 func fatal(format string, args ...interface{}) {
