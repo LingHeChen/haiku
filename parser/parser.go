@@ -581,13 +581,20 @@ func getNestedValue(data interface{}, path string) interface{} {
 }
 
 // toJSONString 将值转换为字符串（用于变量替换）
+// 如果值包含特殊字符，会自动添加引号
 func toJSONString(v interface{}) string {
 	if v == nil {
-		return ""
+		return "null"
 	}
 	
 	switch val := v.(type) {
 	case string:
+		// 如果字符串包含特殊字符（空格、冒号、引号等），需要用引号包围
+		if needsQuoting(val) {
+			// 转义内部引号并用引号包围
+			escaped := strings.ReplaceAll(val, `"`, `\"`)
+			return `"` + escaped + `"`
+		}
 		return val
 	case float64:
 		// 整数显示为整数
@@ -603,12 +610,31 @@ func toJSONString(v interface{}) string {
 		}
 		return "false"
 	default:
-		// 复杂类型转 JSON
+		// 复杂类型转 JSON，用引号包围
 		if jsonBytes, err := json.Marshal(val); err == nil {
-			return string(jsonBytes)
+			escaped := strings.ReplaceAll(string(jsonBytes), `"`, `\"`)
+			return `"` + escaped + `"`
 		}
 		return ""
 	}
+}
+
+// needsQuoting 检查字符串是否需要引号
+func needsQuoting(s string) bool {
+	if s == "" {
+		return true
+	}
+	// 包含空格、冒号、引号、换行等特殊字符时需要引号
+	for _, c := range s {
+		if c == ' ' || c == ':' || c == '"' || c == '\n' || c == '\t' || c == '{' || c == '}' || c == '[' || c == ']' {
+			return true
+		}
+	}
+	// URL 需要引号
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		return true
+	}
+	return false
 }
 
 // ExtractVariables 从整个输入中提取变量（包括 import）
