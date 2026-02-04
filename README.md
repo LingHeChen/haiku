@@ -136,7 +136,17 @@ Values are automatically inferred:
 | `note null` | null | `null` |
 | `name "John Smith"` | string | `"John Smith"` |
 
-Only strings with spaces need quotes.
+## Quoting Rules
+
+**Must be quoted:**
+- URLs: `get "https://example.com/api"`
+- Strings with spaces: `name "John Smith"`
+- Strings with special characters: `path "/api/v1"`
+
+**Can be unquoted:**
+- Simple strings: `name John`
+- Numbers: `age 25`
+- Booleans: `active true`
 
 ## HTTP Methods
 
