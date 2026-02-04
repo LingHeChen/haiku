@@ -359,16 +359,29 @@ type Parser struct {
 	parser *participle.Parser[Config]
 }
 
-// New 创建一个新的 Haiku 解析器
-func New() (*Parser, error) {
+// 全局单例解析器（避免重复初始化）
+var defaultParser *Parser
+var defaultParserErr error
+
+func init() {
+	// 程序启动时初始化解析器
 	p, err := participle.Build[Config](
 		participle.Lexer(haikuLexer),
 		participle.Elide("Whitespace"), // 跳过空白
 	)
 	if err != nil {
-		return nil, err
+		defaultParserErr = err
+		return
 	}
-	return &Parser{parser: p}, nil
+	defaultParser = &Parser{parser: p}
+}
+
+// New 返回全局解析器实例（单例模式）
+func New() (*Parser, error) {
+	if defaultParserErr != nil {
+		return nil, defaultParserErr
+	}
+	return defaultParser, nil
 }
 
 // Parse 解析 Haiku 格式的字符串，返回 Config AST

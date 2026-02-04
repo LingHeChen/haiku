@@ -19,7 +19,7 @@ body
 
 ---
 
-# 第二个请求：将上一个响应作为 body 发送
+# 第三个请求：将上一个响应作为 body 发送
 post "$base_url/post"
 headers
   Content-Type "application/json"
