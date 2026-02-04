@@ -530,3 +530,169 @@ func inferType(s string) interface{} {
 	// 默认作为字符串
 	return s
 }
+
+// ---------------------------------------------------------
+// 链式调用支持
+// ---------------------------------------------------------
+
+// SplitRequests 将输入按 --- 分割成多个请求
+func SplitRequests(input string) []string {
+	// 使用 --- 分割（独占一行）
+	parts := regexp.MustCompile(`(?m)^---\s*$`).Split(input, -1)
+	
+	var requests []string
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			requests = append(requests, part)
+		}
+	}
+	
+	return requests
+}
+
+// getNestedValue 从 map 中获取嵌套字段的值
+// 支持路径如 "data.user.id"
+func getNestedValue(data interface{}, path string) interface{} {
+	if path == "" {
+		return data
+	}
+	
+	parts := strings.Split(path, ".")
+	current := data
+	
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			current = v[part]
+		case []interface{}:
+			// 支持数组索引
+			if idx, err := strconv.Atoi(part); err == nil && idx >= 0 && idx < len(v) {
+				current = v[idx]
+			} else {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+	
+	return current
+}
+
+// toJSONString 将值转换为字符串（用于变量替换）
+func toJSONString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		// 整数显示为整数
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10)
+		}
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		// 复杂类型转 JSON
+		if jsonBytes, err := json.Marshal(val); err == nil {
+			return string(jsonBytes)
+		}
+		return ""
+	}
+}
+
+// ParseToMapWithResponse 解析请求，支持上一个响应的引用
+func (p *Parser) ParseToMapWithResponse(input string, basePath string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
+	// 1. 提取变量（支持 import）
+	vars := extractVariablesWithImports(input, basePath)
+
+	// 2. 替换变量引用（包含响应引用）
+	input = substituteVariablesWithResponse(input, vars, prevResponse)
+
+	// 3. 预处理（缩进 → 大括号）
+	bracedCode := preprocess(input)
+
+	// 4. 解析
+	config, err := p.parser.ParseString("", bracedCode)
+	if err != nil {
+		return nil, err
+	}
+
+	return config.ToMap(), nil
+}
+
+// substituteVariablesWithResponse 替换变量，支持响应引用
+func substituteVariablesWithResponse(input string, vars map[string]string, prevResponse map[string]interface{}) string {
+	// 先处理旧语法 {{var}} 和 {{$ENV}}（兼容）
+	input = legacyVarRefRegex.ReplaceAllStringFunc(input, func(match string) string {
+		name := match[2 : len(match)-2]
+		name = strings.TrimSpace(name)
+
+		if strings.HasPrefix(name, "$") {
+			envName := name[1:]
+			if val := os.Getenv(envName); val != "" {
+				return val
+			}
+			return match
+		}
+
+		if val, ok := vars[name]; ok {
+			return val
+		}
+
+		return match
+	})
+
+	// 处理新语法 $var, $env.VAR, $_.field
+	input = varRefRegex.ReplaceAllStringFunc(input, func(match string) string {
+		name := match[1:] // 去掉 $
+
+		// 响应引用: $_ 或 $_.field
+		if strings.HasPrefix(name, "_") {
+			if prevResponse == nil {
+				return match // 没有上一个响应，保留原样
+			}
+			
+			if name == "_" {
+				// $_ 返回整个响应的 JSON
+				return toJSONString(prevResponse)
+			}
+			
+			// $_.field.subfield
+			path := name[2:] // 去掉 "_."
+			value := getNestedValue(prevResponse, path)
+			if value == nil {
+				return match // 字段不存在，保留原样
+			}
+			return toJSONString(value)
+		}
+
+		// 环境变量引用: $env.VAR
+		if strings.HasPrefix(name, "env.") {
+			envName := name[4:]
+			if val := os.Getenv(envName); val != "" {
+				return val
+			}
+			return match
+		}
+
+		// 普通变量
+		if val, ok := vars[name]; ok {
+			return val
+		}
+
+		return match
+	})
+
+	return input
+}

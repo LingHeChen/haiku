@@ -125,6 +125,39 @@ headers
   Authorization "$token"
 ```
 
+### Request Chaining
+
+Use `---` to separate multiple requests and `$_` to reference the previous response:
+
+```haiku
+# First request: login
+post "https://api.example.com/login"
+body
+  username admin
+  password secret
+
+---
+
+# Second request: use token from previous response
+get "https://api.example.com/users"
+headers
+  Authorization "Bearer $_.token"
+
+---
+
+# Third request: use data from previous response
+delete "https://api.example.com/users/$_.data.0.id"
+```
+
+**Response Reference Syntax:**
+
+| Syntax | Description |
+|--------|-------------|
+| `$_` | Entire previous response (as JSON) |
+| `$_.field` | Top-level field |
+| `$_.data.user.id` | Nested field |
+| `$_.items.0.name` | Array element (0-indexed) |
+
 ## Type Inference
 
 Values are automatically inferred:
@@ -170,7 +203,7 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 ### Request Features
 
-- [ ] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
+- [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
 - [ ] Retry with backoff
 - [ ] Timeout configuration
 - [ ] Follow redirects option

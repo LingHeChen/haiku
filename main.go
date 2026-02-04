@@ -154,26 +154,54 @@ func showParsed(input string, basePath string) {
 }
 
 func execute(input string, basePath string) {
-	// 解析
+	// 解析器
 	p, err := parser.New()
 	if err != nil {
 		fatal("初始化解析器失败: %v", err)
 	}
 
-	start := time.Now()
-	mapData, err := p.ParseToMapWithBasePath(input, basePath)
-	if err != nil {
-		fatal("解析错误: %v", err)
+	// 分割多个请求（用 --- 分隔）
+	requests := parser.SplitRequests(input)
+	
+	var prevResponse map[string]interface{}
+	totalStart := time.Now()
+
+	for i, reqInput := range requests {
+		// 如果有多个请求，显示序号
+		if len(requests) > 1 {
+			fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
+		}
+
+		start := time.Now()
+		
+		// 解析，传入上一个响应
+		mapData, err := p.ParseToMapWithResponse(reqInput, basePath, prevResponse)
+		if err != nil {
+			fatal("解析错误: %v", err)
+		}
+
+		// 发送请求
+		resp, err := request.Do(mapData)
+		if err != nil {
+			fatal("请求错误: %v", err)
+		}
+
+		// 输出结果
+		printResponse(resp, time.Since(start))
+
+		// 保存响应用于下一个请求
+		prevResponse, _ = resp.JSON()
+		
+		// 如果有多个请求，添加分隔
+		if len(requests) > 1 && i < len(requests)-1 {
+			fmt.Println()
+		}
 	}
 
-	// 发送请求
-	resp, err := request.Do(mapData)
-	if err != nil {
-		fatal("请求错误: %v", err)
+	// 如果有多个请求，显示总耗时
+	if len(requests) > 1 {
+		fmt.Printf("\n\033[2mTotal: %d requests in %v\033[0m\n", len(requests), time.Since(totalStart).Round(time.Millisecond))
 	}
-
-	// 输出结果
-	printResponse(resp, time.Since(start))
 }
 
 func printResponse(resp *request.Response, totalTime time.Duration) {
