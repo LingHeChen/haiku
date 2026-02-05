@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/LingHeChen/haiku/ast"
 )
@@ -218,6 +220,17 @@ func (e *Evaluator) evalRequest(stmt *ast.RequestStmt) (map[string]interface{}, 
 	return req, nil
 }
 
+// ParallelStats holds statistics from parallel execution
+type ParallelStats struct {
+	Total     int
+	Success   int
+	Failed    int
+	TotalTime time.Duration
+	MinTime   time.Duration
+	MaxTime   time.Duration
+	AvgTime   time.Duration
+}
+
 func (e *Evaluator) evalFor(stmt *ast.ForStmt) error {
 	return e.evalForCollect(stmt)
 }
@@ -240,7 +253,12 @@ func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 		return fmt.Errorf("for loop: cannot iterate over %T", iterable)
 	}
 
-	// Iterate
+	// Handle parallel execution
+	if stmt.Parallel {
+		return e.evalParallelFor(stmt, items)
+	}
+
+	// Sequential iteration
 	for i, item := range items {
 		// Create new scope for loop iteration
 		loopScope := NewScope(e.scope)
@@ -267,6 +285,189 @@ func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 	}
 
 	return nil
+}
+
+func (e *Evaluator) evalParallelFor(stmt *ast.ForStmt, items []interface{}) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Determine concurrency limit
+	concurrency := stmt.Concurrency
+	if concurrency <= 0 {
+		concurrency = len(items) // Unlimited (all at once)
+	}
+
+	// Create semaphore for concurrency control
+	sem := make(chan struct{}, concurrency)
+	
+	// WaitGroup for synchronization
+	var wg sync.WaitGroup
+	
+	// Mutex for thread-safe collection
+	var mu sync.Mutex
+	var errors []error
+	var parallelRequests []map[string]interface{}
+	
+	// Statistics
+	var stats ParallelStats
+	stats.Total = len(items)
+	var times []time.Duration
+
+	for i, item := range items {
+		wg.Add(1)
+		
+		go func(idx int, itm interface{}) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			
+			start := time.Now()
+			
+			// Create new scope for loop iteration
+			loopScope := NewScope(e.scope)
+			loopScope.Set(stmt.ItemVar, itm)
+			if stmt.IndexVar != "" {
+				loopScope.Set(stmt.IndexVar, int64(idx))
+			}
+			
+			// Create a temporary evaluator for this goroutine
+			// to avoid concurrent access issues
+			tempEval := &Evaluator{
+				scope:           loopScope,
+				prevResponse:    e.prevResponse,
+				basePath:        e.basePath,
+				requestCallback: e.requestCallback,
+			}
+			
+			// Evaluate body statements
+			var iterRequests []map[string]interface{}
+			for _, bodyStmt := range stmt.Body {
+				if reqStmt, ok := bodyStmt.(*ast.RequestStmt); ok {
+					req, err := tempEval.evalRequest(reqStmt)
+					if err != nil {
+						mu.Lock()
+						errors = append(errors, err)
+						stats.Failed++
+						mu.Unlock()
+						return
+					}
+					if req != nil {
+						iterRequests = append(iterRequests, req)
+						
+						// Execute request if callback is set
+						if e.requestCallback != nil {
+							_, err := e.requestCallback(req)
+							if err != nil {
+								mu.Lock()
+								errors = append(errors, err)
+								mu.Unlock()
+							}
+						}
+					}
+				}
+			}
+			
+			elapsed := time.Since(start)
+			
+			mu.Lock()
+			parallelRequests = append(parallelRequests, iterRequests...)
+			times = append(times, elapsed)
+			if len(errors) == 0 || errors[len(errors)-1] == nil {
+				stats.Success++
+			}
+			mu.Unlock()
+		}(i, item)
+	}
+	
+	wg.Wait()
+	
+	// Calculate statistics
+	if len(times) > 0 {
+		stats.MinTime = times[0]
+		stats.MaxTime = times[0]
+		var totalTime time.Duration
+		for _, t := range times {
+			totalTime += t
+			if t < stats.MinTime {
+				stats.MinTime = t
+			}
+			if t > stats.MaxTime {
+				stats.MaxTime = t
+			}
+		}
+		stats.TotalTime = totalTime
+		stats.AvgTime = totalTime / time.Duration(len(times))
+	}
+	
+	// Add collected requests (but mark them as already executed if callback was set)
+	if e.requestCallback == nil {
+		e.collectedRequests = append(e.collectedRequests, parallelRequests...)
+	}
+	
+	// Store stats in a special variable for potential output
+	statsMap := map[string]interface{}{
+		"total":      stats.Total,
+		"success":    stats.Success,
+		"failed":     stats.Failed,
+		"total_time": stats.TotalTime.String(),
+		"min_time":   stats.MinTime.String(),
+		"max_time":   stats.MaxTime.String(),
+		"avg_time":   stats.AvgTime.String(),
+	}
+	e.scope.Set("_parallel_stats", statsMap) // keep last stats for compatibility
+
+	// Also append to a list so multiple parallel loops are visible
+	if existing, ok := e.scope.Get("_parallel_stats_list"); ok {
+		if list, ok := existing.([]interface{}); ok {
+			list = append(list, statsMap)
+			e.scope.Set("_parallel_stats_list", list)
+		} else {
+			e.scope.Set("_parallel_stats_list", []interface{}{statsMap})
+		}
+	} else {
+		e.scope.Set("_parallel_stats_list", []interface{}{statsMap})
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("parallel execution had %d errors, first: %v", len(errors), errors[0])
+	}
+	
+	return nil
+}
+
+// GetParallelStats returns the stats from the last parallel execution
+func (e *Evaluator) GetParallelStats() map[string]interface{} {
+	if val, ok := e.scope.Get("_parallel_stats"); ok {
+		if stats, ok := val.(map[string]interface{}); ok {
+			return stats
+		}
+	}
+	return nil
+}
+
+// GetAllParallelStats returns the stats from all parallel loops (in order)
+func (e *Evaluator) GetAllParallelStats() []map[string]interface{} {
+	val, ok := e.scope.Get("_parallel_stats_list")
+	if !ok {
+		return nil
+	}
+	list, ok := val.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(list))
+	for _, item := range list {
+		if m, ok := item.(map[string]interface{}); ok {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (e *Evaluator) evalExpr(expr ast.Expression) interface{} {

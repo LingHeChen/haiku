@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/LingHeChen/haiku/ast"
 	"github.com/LingHeChen/haiku/eval"
 	"github.com/LingHeChen/haiku/parser"
 	"github.com/LingHeChen/haiku/request"
@@ -213,49 +215,162 @@ func execute(input string, basePath string) {
 		fatal("解析错误: %v", err)
 	}
 
-	evaluator := eval.NewEvaluator(eval.WithBasePath(basePath))
-	requests, err := evaluator.EvalToRequests(program)
-	if err != nil {
-		fatal("执行错误: %v", err)
-	}
-
+	// 检查是否包含 parallel for
+	hasParallel := containsParallelFor(program)
+	
 	var lastResp *request.Response
 	totalStart := time.Now()
-
-	for i, mapData := range requests {
-		// 如果有多个请求，显示序号（非静默模式）
-		if len(requests) > 1 && !quietMode && !bodyOnly {
-			fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
-		}
-
-		start := time.Now()
-
-		// 发送请求
-		resp, err := request.Do(mapData)
-		if err != nil {
-			fatal("请求错误: %v", err)
-		}
-
-		// 输出结果
-		printResponse(resp, time.Since(start))
-
-		lastResp = resp
-		
-		// 如果有多个请求，添加分隔
-		if len(requests) > 1 && i < len(requests)-1 && !quietMode && !bodyOnly {
-			fmt.Println()
-		}
+	
+	// 并行执行统计
+	var parallelStats struct {
+		Total   int
+		Success int
+		Failed  int
+		Times   []time.Duration
 	}
+	var statsMu sync.Mutex
 
-	// 如果有多个请求，显示总耗时
-	if len(requests) > 1 && !quietMode && !bodyOnly {
-		fmt.Printf("\n\033[2mTotal: %d requests in %v\033[0m\n", len(requests), time.Since(totalStart).Round(time.Millisecond))
+	if hasParallel {
+		// 使用带回调的 evaluator 来真正执行请求
+		evaluator := eval.NewEvaluator(
+			eval.WithBasePath(basePath),
+			eval.WithRequestCallback(func(req map[string]interface{}) (map[string]interface{}, error) {
+				resp, err := request.Do(req)
+				if err != nil {
+					statsMu.Lock()
+					parallelStats.Failed++
+					statsMu.Unlock()
+					return nil, err
+				}
+				
+				statsMu.Lock()
+				parallelStats.Success++
+				parallelStats.Times = append(parallelStats.Times, resp.Duration)
+				statsMu.Unlock()
+				
+				lastResp = resp
+				
+				// 返回响应体作为下一个请求的 $_ 引用
+				if jsonData, err := resp.JSON(); err == nil {
+					return jsonData, nil
+				}
+				return map[string]interface{}{"body": resp.String()}, nil
+			}),
+		)
+		
+		_, err = evaluator.Eval(program)
+		if err != nil {
+			fatal("执行错误: %v", err)
+		}
+		
+		// 显示并行执行统计（每个 parallel for 一份）
+		if !quietMode && !bodyOnly {
+			all := evaluator.GetAllParallelStats()
+			if len(all) > 0 {
+				for idx, stats := range all {
+					printParallelStats(stats, idx+1, time.Since(totalStart))
+				}
+			} else if stats := evaluator.GetParallelStats(); stats != nil {
+				printParallelStats(stats, 1, time.Since(totalStart))
+			}
+		}
+	} else {
+		// 顺序执行（原逻辑）
+		evaluator := eval.NewEvaluator(eval.WithBasePath(basePath))
+		requests, err := evaluator.EvalToRequests(program)
+		if err != nil {
+			fatal("执行错误: %v", err)
+		}
+
+		for i, mapData := range requests {
+			// 如果有多个请求，显示序号（非静默模式）
+			if len(requests) > 1 && !quietMode && !bodyOnly {
+				fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
+			}
+
+			start := time.Now()
+
+			// 发送请求
+			resp, err := request.Do(mapData)
+			if err != nil {
+				fatal("请求错误: %v", err)
+			}
+
+			// 输出结果
+			printResponse(resp, time.Since(start))
+
+			lastResp = resp
+			
+			// 如果有多个请求，添加分隔
+			if len(requests) > 1 && i < len(requests)-1 && !quietMode && !bodyOnly {
+				fmt.Println()
+			}
+		}
+
+		// 如果有多个请求，显示总耗时
+		if len(requests) > 1 && !quietMode && !bodyOnly {
+			fmt.Printf("\n\033[2mTotal: %d requests in %v\033[0m\n", len(requests), time.Since(totalStart).Round(time.Millisecond))
+		}
 	}
 
 	// 保存到文件（只保存最后一个响应）
 	if outputFile != "" && lastResp != nil {
 		saveToFile(lastResp)
 	}
+}
+
+// containsParallelFor 检查程序是否包含 parallel for 语句
+func containsParallelFor(program *ast.Program) bool {
+	for _, stmt := range program.Statements {
+		if forStmt, ok := stmt.(*ast.ForStmt); ok {
+			if forStmt.Parallel {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// printParallelStats 打印并行执行统计
+func printParallelStats(stats map[string]interface{}, loopIndex int, totalTime time.Duration) {
+	// 颜色码
+	reset := "\033[0m"
+	bold := "\033[1m"
+	green := "\033[32m"
+	red := "\033[31m"
+	cyan := "\033[36m"
+	dim := "\033[2m"
+
+	fmt.Println()
+	fmt.Printf("%s%s═══ Parallel Execution Stats (loop %d) ═══%s\n", bold, cyan, loopIndex, reset)
+	
+	total, _ := stats["total"].(int)
+	success, _ := stats["success"].(int)
+	failed, _ := stats["failed"].(int)
+	
+	successColor := green
+	if success < total {
+		successColor = red
+	}
+	
+	fmt.Printf("  Total:    %d requests\n", total)
+	fmt.Printf("  Success:  %s%d%s\n", successColor, success, reset)
+	if failed > 0 {
+		fmt.Printf("  Failed:   %s%d%s\n", red, failed, reset)
+	}
+	
+	if avgTime, ok := stats["avg_time"].(string); ok {
+		fmt.Printf("  Avg Time: %s\n", avgTime)
+	}
+	if minTime, ok := stats["min_time"].(string); ok {
+		fmt.Printf("  Min Time: %s\n", minTime)
+	}
+	if maxTime, ok := stats["max_time"].(string); ok {
+		fmt.Printf("  Max Time: %s\n", maxTime)
+	}
+	
+	fmt.Printf("  %sWall Time: %v%s\n", dim, totalTime.Round(time.Millisecond), reset)
+	fmt.Printf("%s%s══════════════════════════════════%s\n", bold, cyan, reset)
 }
 
 // saveToFile 保存响应到文件

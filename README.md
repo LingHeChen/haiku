@@ -234,6 +234,39 @@ for $index, $user in $users
     name $user.name
 ```
 
+### Parallel For Loop
+
+Use `parallel for` to run loop requests concurrently (useful for load testing).
+
+**Unlimited concurrency:**
+
+```haiku
+@urls json`[
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1"
+]`
+
+parallel for $url in $urls
+  get $url
+```
+
+**Limit concurrency (max N workers):**
+
+```haiku
+@endpoints json`[
+  "https://httpbin.org/get?id=1",
+  "https://httpbin.org/get?id=2",
+  "https://httpbin.org/get?id=3",
+  "https://httpbin.org/get?id=4"
+]`
+
+parallel 2 for $endpoint in $endpoints
+  get $endpoint
+```
+
+When running `parallel for`, Haiku prints per-loop stats (total/success/failed and timings).
+
 ## Type Inference
 
 Values are automatically inferred:

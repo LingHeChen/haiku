@@ -74,13 +74,15 @@ func (s *RequestStmt) nodeType() string  { return "RequestStmt" }
 func (s *RequestStmt) Pos() Position     { return s.Position }
 func (s *RequestStmt) statementNode()    {}
 
-// ForStmt: for $item in $items ...
+// ForStmt: for $item in $items ... or parallel [N] for $item in $items ...
 type ForStmt struct {
-	Position  Position
-	IndexVar  string       // optional, for "for $i, $item in ..."
-	ItemVar   string       // loop variable name
-	Iterable  Expression   // the collection to iterate
-	Body      []Statement  // statements inside the loop
+	Position    Position
+	Parallel    bool        // true if this is a parallel for loop
+	Concurrency int         // max concurrent requests (0 means unlimited)
+	IndexVar    string      // optional, for "for $i, $item in ..."
+	ItemVar     string      // loop variable name
+	Iterable    Expression  // the collection to iterate
+	Body        []Statement // statements inside the loop
 }
 
 func (s *ForStmt) nodeType() string  { return "ForStmt" }

@@ -101,8 +101,10 @@ func (p *ParserV2) parseStatement() ast.Statement {
 		return p.parseImportStmt()
 	case lexer.AT:
 		return p.parseVarDefStmt()
+	case lexer.PARALLEL:
+		return p.parseParallelForStmt()
 	case lexer.FOR:
-		return p.parseForStmt()
+		return p.parseForStmt(false, 0)
 	case lexer.TRIPLE_DASH:
 		return p.parseSeparatorStmt()
 	case lexer.GET, lexer.POST, lexer.PUT, lexer.DELETE, lexer.PATCH, lexer.HEAD, lexer.OPTIONS:
@@ -164,9 +166,37 @@ func (p *ParserV2) parseVarDefStmt() *ast.VarDefStmt {
 	return stmt
 }
 
-func (p *ParserV2) parseForStmt() *ast.ForStmt {
+func (p *ParserV2) parseParallelForStmt() *ast.ForStmt {
+	pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+	
+	p.nextToken() // skip 'parallel'
+	
+	// Check for optional concurrency number
+	concurrency := 0
+	if p.curTokenIs(lexer.INT) {
+		val, _ := strconv.Atoi(p.curToken.Literal)
+		concurrency = val
+		p.nextToken()
+	}
+	
+	// Expect 'for'
+	if !p.curTokenIs(lexer.FOR) {
+		p.addError("expected 'for' after 'parallel'")
+		return nil
+	}
+	
+	stmt := p.parseForStmt(true, concurrency)
+	if stmt != nil {
+		stmt.Position = pos
+	}
+	return stmt
+}
+
+func (p *ParserV2) parseForStmt(parallel bool, concurrency int) *ast.ForStmt {
 	stmt := &ast.ForStmt{
-		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
+		Position:    ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
+		Parallel:    parallel,
+		Concurrency: concurrency,
 	}
 
 	// Expect $varname

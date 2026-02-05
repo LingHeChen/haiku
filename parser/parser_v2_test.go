@@ -226,3 +226,42 @@ func TestParserV2ForLoopFile(t *testing.T) {
 		fmt.Printf("Request %d:\n%s\n\n", i+1, string(jsonBytes))
 	}
 }
+
+func TestParserV2ParallelForLoop(t *testing.T) {
+	input := `
+@ids json` + "`[1, 2, 3, 4]`" + `
+
+parallel 2 for $id in $ids
+  get "https://api.example.com/users/$id"
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	if len(requests) != 4 {
+		t.Fatalf("expected 4 requests, got %d", len(requests))
+	}
+
+	// Order is not guaranteed for parallel collection; verify set membership.
+	seen := make(map[string]bool)
+	for _, req := range requests {
+		url, _ := req["get"].(string)
+		seen[url] = true
+	}
+
+	for _, id := range []int{1, 2, 3, 4} {
+		want := fmt.Sprintf("https://api.example.com/users/%d", id)
+		if !seen[want] {
+			t.Fatalf("missing request url: %s", want)
+		}
+	}
+}

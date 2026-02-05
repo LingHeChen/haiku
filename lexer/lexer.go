@@ -29,6 +29,7 @@ const (
 	IMPORT
 	FOR
 	IN
+	PARALLEL
 	GET
 	POST
 	PUT
@@ -68,6 +69,7 @@ var tokenNames = map[TokenType]string{
 	IMPORT:      "IMPORT",
 	FOR:         "FOR",
 	IN:          "IN",
+	PARALLEL:    "PARALLEL",
 	GET:         "GET",
 	POST:        "POST",
 	PUT:         "PUT",
@@ -484,9 +486,10 @@ func isIdentChar(ch byte) bool {
 }
 
 var keywords = map[string]TokenType{
-	"import":  IMPORT,
-	"for":     FOR,
-	"in":      IN,
+	"import":   IMPORT,
+	"for":      FOR,
+	"in":       IN,
+	"parallel": PARALLEL,
 	"get":     GET,
 	"post":    POST,
 	"put":     PUT,

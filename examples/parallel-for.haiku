@@ -1,0 +1,27 @@
+# 并行请求示例 - 用于压测或批量请求
+
+# 定义要请求的 URL 列表
+@urls json`[
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1",
+  "https://httpbin.org/delay/1"
+]`
+
+# 并行执行所有请求（无并发限制）
+parallel for $url in $urls
+  get $url
+
+---
+
+# 带并发限制的并行请求（同时最多 2 个）
+@endpoints json`[
+  "https://httpbin.org/get?id=1",
+  "https://httpbin.org/get?id=2",
+  "https://httpbin.org/get?id=3",
+  "https://httpbin.org/get?id=4"
+]`
+
+parallel 2 for $endpoint in $endpoints
+  get $endpoint
