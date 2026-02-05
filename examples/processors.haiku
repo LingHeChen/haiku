@@ -1,0 +1,18 @@
+# 字符串处理器示例
+
+# json`...` - 直接嵌入 JSON
+post "https://httpbin.org/post"
+headers
+  Content-Type "application/json"
+body
+  simple value
+  nested json`{"name": "John", "age": 25, "tags": ["api", "test"]}`
+  array json`[1, 2, 3, "four"]`
+
+---
+
+# base64`...` - Base64 解码
+post "https://httpbin.org/post"
+body
+  message base64`SGVsbG8gV29ybGQh`
+  encoded "raw base64 string"

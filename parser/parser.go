@@ -3,6 +3,7 @@
 package parser
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"regexp"
@@ -30,13 +31,14 @@ type Entry struct {
 
 // Value 表示配置值，支持多种类型
 type Value struct {
-	String      *QuotedString `parser:"  @String"`
-	Float       *float64      `parser:"| @Float"`
-	Int         *int64        `parser:"| @Int"`
-	Bool        *Boolean      `parser:"| @('true' | 'false')"`
-	EmptyArray  *string       `parser:"| @EmptyArray"`  // 空数组 []
-	EmptyObject *string       `parser:"| @EmptyObject"` // 空对象 {}
-	Raw         *string       `parser:"| @Ident"`       // 处理无引号字符串
+	Processed   *ProcessedString `parser:"  @ProcessedString"` // json`...`, yaml`...`
+	String      *QuotedString    `parser:"| @String"`
+	Float       *float64         `parser:"| @Float"`
+	Int         *int64           `parser:"| @Int"`
+	Bool        *Boolean         `parser:"| @('true' | 'false')"`
+	EmptyArray  *string          `parser:"| @EmptyArray"`  // 空数组 []
+	EmptyObject *string          `parser:"| @EmptyObject"` // 空对象 {}
+	Raw         *string          `parser:"| @Ident"`       // 处理无引号字符串
 
 	// 嵌套结构：预处理会把缩进变成 { ... }
 	Block *Config `parser:"| '{' @@ '}'"`
@@ -58,6 +60,26 @@ func (s *QuotedString) Capture(values []string) error {
 	} else {
 		*s = QuotedString(v)
 	}
+	return nil
+}
+
+// ProcessedString 处理器字符串类型，如 json`...`, yaml`...`
+type ProcessedString struct {
+	Processor string // json, yaml, base64, file 等
+	Content   string // 反引号内的内容
+}
+
+// Capture 实现 participle 的 Capture 接口
+func (p *ProcessedString) Capture(values []string) error {
+	v := values[0]
+	// 找到反引号位置
+	idx := strings.Index(v, "`")
+	if idx == -1 {
+		return nil
+	}
+	p.Processor = v[:idx]
+	// 去除反引号
+	p.Content = v[idx+1 : len(v)-1]
 	return nil
 }
 
@@ -111,6 +133,11 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 
 // MarshalJSON 自定义 Value 的 JSON 序列化
 func (v *Value) MarshalJSON() ([]byte, error) {
+	if v.Processed != nil {
+		// 处理 json`...`, yaml`...` 等
+		result := processString(v.Processed.Processor, v.Processed.Content)
+		return json.Marshal(result)
+	}
 	if v.String != nil {
 		return json.Marshal(v.String)
 	}
@@ -340,6 +367,7 @@ func substituteVariables(input string, vars map[string]string) string {
 // ---------------------------------------------------------
 
 var haikuLexer = lexer.MustSimple([]lexer.SimpleRule{
+	{Name: "ProcessedString", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*`[^`]*`"}, // json`...`, yaml`...`
 	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"`},
 	{Name: "Float", Pattern: `\d+\.\d+`},
 	{Name: "Int", Pattern: `\d+`},
@@ -473,6 +501,9 @@ func (v *Value) ToInterface() interface{} {
 	if v == nil {
 		return nil
 	}
+	if v.Processed != nil {
+		return processString(v.Processed.Processor, v.Processed.Content)
+	}
 	if v.String != nil {
 		return string(*v.String)
 	}
@@ -513,6 +544,39 @@ func (v *Value) ToInterface() interface{} {
 		return v.Block.ToMap()
 	}
 	return nil
+}
+
+// processString 处理字符串处理器
+func processString(processor, content string) interface{} {
+	switch processor {
+	case "json":
+		var result interface{}
+		if err := json.Unmarshal([]byte(content), &result); err != nil {
+			// 解析失败返回原始字符串
+			return content
+		}
+		return result
+	case "base64":
+		decoded, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return content
+		}
+		return string(decoded)
+	case "file":
+		data, err := os.ReadFile(content)
+		if err != nil {
+			return content
+		}
+		// 尝试解析为 JSON
+		var result interface{}
+		if err := json.Unmarshal(data, &result); err == nil {
+			return result
+		}
+		return string(data)
+	default:
+		// 未知处理器，返回原始内容
+		return content
+	}
 }
 
 // inferType 智能推断字符串值的实际类型
