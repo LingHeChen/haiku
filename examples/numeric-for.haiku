@@ -1,0 +1,20 @@
+# 数字循环示例
+
+# 方式1: 完整语法 for $i in 10
+for $i in 10
+  get "https://httpbin.org/get?id=$i"
+
+---
+
+# 方式2: 简化语法 for 10 (默认变量名 $index)
+for 5
+  post "https://httpbin.org/post"
+  body
+    iteration $index
+    message "Request #$index"
+
+---
+
+# 并行数字循环
+parallel 3 for $i in 8
+  get "https://httpbin.org/get?id=$i"

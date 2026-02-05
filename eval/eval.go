@@ -162,6 +162,11 @@ func (e *Evaluator) evalStatementCollect(stmt ast.Statement) error {
 	return nil
 }
 
+// EvalImport evaluates an import statement (public method)
+func (e *Evaluator) EvalImport(stmt *ast.ImportStmt) error {
+	return e.evalImport(stmt)
+}
+
 func (e *Evaluator) evalImport(stmt *ast.ImportStmt) error {
 	path := stmt.Path
 	if e.basePath != "" && !strings.HasPrefix(path, "/") {
@@ -189,6 +194,11 @@ func (e *Evaluator) evalImport(stmt *ast.ImportStmt) error {
 	return nil
 }
 
+// EvalVarDef evaluates a variable definition (public method)
+func (e *Evaluator) EvalVarDef(stmt *ast.VarDefStmt) error {
+	return e.evalVarDef(stmt)
+}
+
 func (e *Evaluator) evalVarDef(stmt *ast.VarDefStmt) error {
 	if stmt.Value == nil {
 		e.scope.Set(stmt.Name, nil)
@@ -198,6 +208,11 @@ func (e *Evaluator) evalVarDef(stmt *ast.VarDefStmt) error {
 	val := e.evalExpr(stmt.Value)
 	e.scope.Set(stmt.Name, val)
 	return nil
+}
+
+// EvalRequest evaluates a request statement (public method)
+func (e *Evaluator) EvalRequest(stmt *ast.RequestStmt) (map[string]interface{}, error) {
+	return e.evalRequest(stmt)
 }
 
 func (e *Evaluator) evalRequest(stmt *ast.RequestStmt) (map[string]interface{}, error) {
@@ -235,6 +250,11 @@ func (e *Evaluator) evalFor(stmt *ast.ForStmt) error {
 	return e.evalForCollect(stmt)
 }
 
+// EvalForCollect evaluates a for loop and collects/executes requests (public method)
+func (e *Evaluator) EvalForCollect(stmt *ast.ForStmt) error {
+	return e.evalForCollect(stmt)
+}
+
 func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 	// Evaluate iterable
 	iterable := e.evalExpr(stmt.Iterable)
@@ -248,6 +268,25 @@ func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 		// Iterate over values
 		for _, val := range v {
 			items = append(items, val)
+		}
+	case int64:
+		// Convert number to range [0, 1, 2, ..., N-1]
+		if v < 0 {
+			return fmt.Errorf("for loop: cannot iterate over negative number %d", v)
+		}
+		items = make([]interface{}, v)
+		for i := int64(0); i < v; i++ {
+			items[i] = i
+		}
+	case float64:
+		// Convert float to int and create range
+		n := int64(v)
+		if v < 0 || float64(n) != v {
+			return fmt.Errorf("for loop: cannot iterate over non-positive integer %g", v)
+		}
+		items = make([]interface{}, n)
+		for i := int64(0); i < n; i++ {
+			items[i] = i
 		}
 	default:
 		return fmt.Errorf("for loop: cannot iterate over %T", iterable)
@@ -271,12 +310,40 @@ func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 		oldScope := e.scope
 		e.scope = loopScope
 
-		// Execute body statements and collect requests
+		// Execute body statements
 		for _, bodyStmt := range stmt.Body {
-			err := e.evalStatementCollect(bodyStmt)
-			if err != nil {
-				e.scope = oldScope
-				return err
+			if reqStmt, ok := bodyStmt.(*ast.RequestStmt); ok {
+				// Evaluate request
+				req, err := e.evalRequest(reqStmt)
+				if err != nil {
+					e.scope = oldScope
+					return err
+				}
+				if req != nil {
+					// Execute request if callback is set (for real-time output)
+					if e.requestCallback != nil {
+						resp, err := e.requestCallback(req)
+						if err != nil {
+							e.scope = oldScope
+							return err
+						}
+						// Update prevResponse for chaining
+						if resp != nil {
+							e.prevResponse = resp
+						}
+					} else {
+						// No callback: just collect
+						e.collectedRequests = append(e.collectedRequests, req)
+						e.prevResponse = req
+					}
+				}
+			} else {
+				// Non-request statement: use evalStatementCollect
+				err := e.evalStatementCollect(bodyStmt)
+				if err != nil {
+					e.scope = oldScope
+					return err
+				}
 			}
 		}
 
@@ -468,6 +535,191 @@ func (e *Evaluator) GetAllParallelStats() []map[string]interface{} {
 		return nil
 	}
 	return out
+}
+
+// GetRequestCallback returns the request callback function
+func (e *Evaluator) GetRequestCallback() func(req map[string]interface{}) (map[string]interface{}, error) {
+	return e.requestCallback
+}
+
+// SetPrevResponse sets the previous response for chaining
+func (e *Evaluator) SetPrevResponse(resp map[string]interface{}) {
+	e.prevResponse = resp
+}
+
+// EvalParallelForWithOutput evaluates a parallel for loop with real-time output
+func (e *Evaluator) EvalParallelForWithOutput(stmt *ast.ForStmt) error {
+	// Evaluate iterable
+	iterable := e.evalExpr(stmt.Iterable)
+
+	// Get slice to iterate
+	var items []interface{}
+	switch v := iterable.(type) {
+	case []interface{}:
+		items = v
+	case map[string]interface{}:
+		// Iterate over values
+		for _, val := range v {
+			items = append(items, val)
+		}
+	case int64:
+		// Convert number to range [0, 1, 2, ..., N-1]
+		if v < 0 {
+			return fmt.Errorf("for loop: cannot iterate over negative number %d", v)
+		}
+		items = make([]interface{}, v)
+		for i := int64(0); i < v; i++ {
+			items[i] = i
+		}
+	case float64:
+		// Convert float to int and create range
+		n := int64(v)
+		if v < 0 || float64(n) != v {
+			return fmt.Errorf("for loop: cannot iterate over non-positive integer %g", v)
+		}
+		items = make([]interface{}, n)
+		for i := int64(0); i < n; i++ {
+			items[i] = i
+		}
+	default:
+		return fmt.Errorf("for loop: cannot iterate over %T", iterable)
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Determine concurrency limit
+	concurrency := stmt.Concurrency
+	if concurrency <= 0 {
+		concurrency = len(items) // Unlimited (all at once)
+	}
+
+	// Create semaphore for concurrency control
+	sem := make(chan struct{}, concurrency)
+	
+	// WaitGroup for synchronization
+	var wg sync.WaitGroup
+	
+	// Mutex for thread-safe collection
+	var mu sync.Mutex
+	var errors []error
+	
+	// Statistics
+	var stats ParallelStats
+	stats.Total = len(items)
+	var times []time.Duration
+
+	for i, item := range items {
+		wg.Add(1)
+		
+		go func(idx int, itm interface{}) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			
+			start := time.Now()
+			
+			// Create new scope for loop iteration
+			loopScope := NewScope(e.scope)
+			loopScope.Set(stmt.ItemVar, itm)
+			if stmt.IndexVar != "" {
+				loopScope.Set(stmt.IndexVar, int64(idx))
+			}
+			
+			// Create a temporary evaluator for this goroutine
+			tempEval := &Evaluator{
+				scope:           loopScope,
+				prevResponse:    e.prevResponse,
+				basePath:        e.basePath,
+				requestCallback: e.requestCallback,
+			}
+			
+			// Evaluate body statements and execute requests with real-time output
+			for _, bodyStmt := range stmt.Body {
+				if reqStmt, ok := bodyStmt.(*ast.RequestStmt); ok {
+					req, err := tempEval.evalRequest(reqStmt)
+					if err != nil {
+						mu.Lock()
+						errors = append(errors, err)
+						stats.Failed++
+						mu.Unlock()
+						return
+					}
+					if req != nil && e.requestCallback != nil {
+						// Execute request and output immediately
+						_, err := e.requestCallback(req)
+						if err != nil {
+							mu.Lock()
+							errors = append(errors, err)
+							stats.Failed++
+							mu.Unlock()
+							return
+						}
+					}
+				}
+			}
+			
+			elapsed := time.Since(start)
+			
+			mu.Lock()
+			times = append(times, elapsed)
+			stats.Success++
+			mu.Unlock()
+		}(i, item)
+	}
+	
+	wg.Wait()
+	
+	// Calculate statistics
+	if len(times) > 0 {
+		stats.MinTime = times[0]
+		stats.MaxTime = times[0]
+		var totalTime time.Duration
+		for _, t := range times {
+			totalTime += t
+			if t < stats.MinTime {
+				stats.MinTime = t
+			}
+			if t > stats.MaxTime {
+				stats.MaxTime = t
+			}
+		}
+		stats.TotalTime = totalTime
+		stats.AvgTime = totalTime / time.Duration(len(times))
+	}
+	
+	// Store stats in a special variable for potential output
+	statsMap := map[string]interface{}{
+		"total":      stats.Total,
+		"success":    stats.Success,
+		"failed":     stats.Failed,
+		"total_time": stats.TotalTime.String(),
+		"min_time":   stats.MinTime.String(),
+		"max_time":   stats.MaxTime.String(),
+		"avg_time":   stats.AvgTime.String(),
+	}
+	e.scope.Set("_parallel_stats", statsMap) // keep last stats for compatibility
+
+	// Also append to a list so multiple parallel loops are visible
+	if existing, ok := e.scope.Get("_parallel_stats_list"); ok {
+		if list, ok := existing.([]interface{}); ok {
+			list = append(list, statsMap)
+			e.scope.Set("_parallel_stats_list", list)
+		} else {
+			e.scope.Set("_parallel_stats_list", []interface{}{statsMap})
+		}
+	} else {
+		e.scope.Set("_parallel_stats_list", []interface{}{statsMap})
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("parallel execution had %d errors, first: %v", len(errors), errors[0])
+	}
+	
+	return nil
 }
 
 func (e *Evaluator) evalExpr(expr ast.Expression) interface{} {

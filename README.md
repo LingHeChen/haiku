@@ -77,6 +77,48 @@ haiku -e 'get "https://httpbin.org/get"'
 
 # From stdin
 echo 'get "https://httpbin.org/ip"' | haiku -
+
+# Verbose mode (show request details)
+haiku --verbose request.haiku
+
+# Quiet mode (only status and timing)
+haiku -q request.haiku
+
+# Save response to file
+haiku request.haiku -o response.json
+```
+
+## Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-p, --parse` | Parse only, show JSON without sending requests |
+| `-q, --quiet` | Quiet mode, only show status code and timing |
+| `--verbose` | Verbose mode, show request details (METHOD URL, Request Headers, Request Body) |
+| `--body-only` | Output only response body (useful for piping) |
+| `-o <file>` | Save response to file |
+| `-h, --help` | Show help message |
+| `-v, --version` | Show version |
+
+**Verbose Mode Example:**
+
+With `--verbose`, you'll see:
+```
+POST https://httpbin.org/post
+Request Headers
+  Content-Type: application/json
+Request Body
+{
+  "name": "John",
+  "age": 25
+}
+──────────────────────────────────────────────────
+200 OK (234ms)
+──────────────────────────────────────────────────
+Response Headers
+  Content-Type: application/json
+Response Body
+{...}
 ```
 
 ## Syntax
@@ -233,6 +275,25 @@ for $index, $user in $users
     position $index
     name $user.name
 ```
+
+**Numeric loops:**
+
+You can iterate over numbers to generate a sequence of requests:
+
+```haiku
+# Full syntax: for $i in 10 (generates 0, 1, 2, ..., 9)
+for $i in 10
+  get "https://api.example.com/users/$i"
+
+# Simplified syntax: for 10 (uses default variable $index)
+for 5
+  post "https://api.example.com/users"
+  body
+    iteration $index
+    message "Request #$index"
+```
+
+Numeric loops generate values from `0` to `N-1` (e.g., `for 10` generates `0, 1, 2, ..., 9`).
 
 ### Parallel For Loop
 

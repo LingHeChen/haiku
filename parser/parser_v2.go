@@ -199,46 +199,55 @@ func (p *ParserV2) parseForStmt(parallel bool, concurrency int) *ast.ForStmt {
 		Concurrency: concurrency,
 	}
 
-	// Expect $varname
-	if !p.expectPeek(lexer.DOLLAR) {
-		return nil
-	}
-	if !p.expectPeek(lexer.IDENT) {
-		return nil
-	}
-	firstVar := p.curToken.Literal
-
-	p.nextToken()
-
-	// Check for optional index variable: for $i, $item in ...
-	if p.curTokenIs(lexer.COMMA) {
-		stmt.IndexVar = firstVar
-		p.nextToken() // skip comma
-		if !p.curTokenIs(lexer.DOLLAR) {
-			p.addError("expected $ after comma in for statement")
-			return nil
-		}
-		p.nextToken() // skip $
-		if !p.curTokenIs(lexer.IDENT) {
-			p.addError("expected identifier after $ in for statement")
-			return nil
-		}
-		stmt.ItemVar = p.curToken.Literal
+	// Check for simplified syntax: for 10 (without variable and 'in')
+	if p.peekTokenIs(lexer.INT) || p.peekTokenIs(lexer.FLOAT) {
+		// Simplified syntax: for 10
 		p.nextToken()
+		stmt.ItemVar = "index" // default variable name
+		stmt.Iterable = p.parseExpression()
 	} else {
-		stmt.ItemVar = firstVar
+		// Full syntax: for $varname in ...
+		// Expect $varname
+		if !p.expectPeek(lexer.DOLLAR) {
+			return nil
+		}
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
+		}
+		firstVar := p.curToken.Literal
+
+		p.nextToken()
+
+		// Check for optional index variable: for $i, $item in ...
+		if p.curTokenIs(lexer.COMMA) {
+			stmt.IndexVar = firstVar
+			p.nextToken() // skip comma
+			if !p.curTokenIs(lexer.DOLLAR) {
+				p.addError("expected $ after comma in for statement")
+				return nil
+			}
+			p.nextToken() // skip $
+			if !p.curTokenIs(lexer.IDENT) {
+				p.addError("expected identifier after $ in for statement")
+				return nil
+			}
+			stmt.ItemVar = p.curToken.Literal
+			p.nextToken()
+		} else {
+			stmt.ItemVar = firstVar
+		}
+
+		// Expect 'in'
+		if !p.curTokenIs(lexer.IN) {
+			p.addError("expected 'in' in for statement")
+			return nil
+		}
+
+		p.nextToken()
+
+		// Parse iterable expression
+		stmt.Iterable = p.parseExpression()
 	}
-
-	// Expect 'in'
-	if !p.curTokenIs(lexer.IN) {
-		p.addError("expected 'in' in for statement")
-		return nil
-	}
-
-	p.nextToken()
-
-	// Parse iterable expression
-	stmt.Iterable = p.parseExpression()
 
 	// Skip to newline
 	for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {

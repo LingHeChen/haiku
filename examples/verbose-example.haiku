@@ -1,0 +1,15 @@
+# Verbose 模式示例
+# 使用 --verbose 参数可以看到请求的详细信息
+
+post "https://httpbin.org/post"
+headers
+  Content-Type "application/json"
+  X-Custom-Header "test-value"
+body
+  name "John"
+  age 25
+  active true
+
+---
+
+get "https://httpbin.org/get?foo=bar"

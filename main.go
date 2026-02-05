@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/LingHeChen/haiku/ast"
@@ -19,9 +18,10 @@ const version = "0.1.0"
 
 // 输出选项
 var (
-	outputFile string // -o file.json
-	quietMode  bool   // -q / --quiet
-	bodyOnly   bool   // --body-only
+	outputFile  string // -o file.json
+	quietMode   bool   // -q / --quiet
+	bodyOnly    bool   // --body-only
+	verboseMode bool   // --verbose
 )
 
 // 输出长度限制
@@ -40,6 +40,7 @@ const usage = `haiku - 人类友好的 HTTP 客户端
   -o <file>      保存响应到文件
   -q, --quiet    静默模式，只显示状态码和耗时
   --body-only    只输出 body（方便管道处理）
+  --verbose      详细模式，显示请求信息（METHOD URL, Headers, Body）
 
 示例:
   # 执行文件
@@ -114,6 +115,10 @@ func main() {
 
 		case "--body-only":
 			bodyOnly = true
+			i++
+
+		case "--verbose":
+			verboseMode = true
 			i++
 
 		case "-o":
@@ -215,101 +220,92 @@ func execute(input string, basePath string) {
 		fatal("解析错误: %v", err)
 	}
 
-	// 检查是否包含 parallel for
-	hasParallel := containsParallelFor(program)
-	
 	var lastResp *request.Response
 	totalStart := time.Now()
+	requestCount := 0
 	
-	// 并行执行统计
-	var parallelStats struct {
-		Total   int
-		Success int
-		Failed  int
-		Times   []time.Duration
-	}
-	var statsMu sync.Mutex
-
-	if hasParallel {
-		// 使用带回调的 evaluator 来真正执行请求
-		evaluator := eval.NewEvaluator(
-			eval.WithBasePath(basePath),
-			eval.WithRequestCallback(func(req map[string]interface{}) (map[string]interface{}, error) {
-				resp, err := request.Do(req)
-				if err != nil {
-					statsMu.Lock()
-					parallelStats.Failed++
-					statsMu.Unlock()
-					return nil, err
-				}
-				
-				statsMu.Lock()
-				parallelStats.Success++
-				parallelStats.Times = append(parallelStats.Times, resp.Duration)
-				statsMu.Unlock()
-				
-				lastResp = resp
-				
-				// 返回响应体作为下一个请求的 $_ 引用
-				if jsonData, err := resp.JSON(); err == nil {
-					return jsonData, nil
-				}
-				return map[string]interface{}{"body": resp.String()}, nil
-			}),
-		)
-		
-		_, err = evaluator.Eval(program)
-		if err != nil {
-			fatal("执行错误: %v", err)
-		}
-		
-		// 显示并行执行统计（每个 parallel for 一份）
-		if !quietMode && !bodyOnly {
-			all := evaluator.GetAllParallelStats()
-			if len(all) > 0 {
-				for idx, stats := range all {
-					printParallelStats(stats, idx+1, time.Since(totalStart))
-				}
-			} else if stats := evaluator.GetParallelStats(); stats != nil {
-				printParallelStats(stats, 1, time.Since(totalStart))
-			}
-		}
-	} else {
-		// 顺序执行（原逻辑）
-		evaluator := eval.NewEvaluator(eval.WithBasePath(basePath))
-		requests, err := evaluator.EvalToRequests(program)
-		if err != nil {
-			fatal("执行错误: %v", err)
-		}
-
-		for i, mapData := range requests {
-			// 如果有多个请求，显示序号（非静默模式）
-			if len(requests) > 1 && !quietMode && !bodyOnly {
-				fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
-			}
-
+	// 创建 evaluator，带请求回调用于实时执行和输出
+	evaluator := eval.NewEvaluator(
+		eval.WithBasePath(basePath),
+		eval.WithRequestCallback(func(req map[string]interface{}) (map[string]interface{}, error) {
+			requestCount++
 			start := time.Now()
-
-			// 发送请求
-			resp, err := request.Do(mapData)
+			
+			// 执行请求
+			resp, err := request.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			
+			// 实时输出结果（非并行请求）
+			if !quietMode && !bodyOnly {
+				printResponse(resp, time.Since(start), req)
+				if requestCount > 1 {
+					fmt.Println()
+				}
+			}
+			
+			lastResp = resp
+			
+			// 返回响应体作为下一个请求的 $_ 引用
+			if jsonData, err := resp.JSON(); err == nil {
+				return jsonData, nil
+			}
+			return map[string]interface{}{"body": resp.String()}, nil
+		}),
+	)
+	
+	// 按语句顺序执行
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *ast.ImportStmt:
+			if err := evaluator.EvalImport(s); err != nil {
+				fatal("执行错误: %v", err)
+			}
+		case *ast.VarDefStmt:
+			if err := evaluator.EvalVarDef(s); err != nil {
+				fatal("执行错误: %v", err)
+			}
+		case *ast.RequestStmt:
+			// 普通请求：立即执行（已在回调中输出）
+			req, err := evaluator.EvalRequest(s)
 			if err != nil {
 				fatal("请求错误: %v", err)
 			}
-
-			// 输出结果
-			printResponse(resp, time.Since(start))
-
-			lastResp = resp
-			
-			// 如果有多个请求，添加分隔
-			if len(requests) > 1 && i < len(requests)-1 && !quietMode && !bodyOnly {
-				fmt.Println()
+			if req != nil && evaluator.GetRequestCallback() != nil {
+				resp, err := evaluator.GetRequestCallback()(req)
+				if err != nil {
+					fatal("请求错误: %v", err)
+				}
+				// Update prevResponse for chaining
+				if resp != nil {
+					evaluator.SetPrevResponse(resp)
+				}
 			}
+		case *ast.ForStmt:
+			if s.Parallel {
+				// 并行循环：并发执行，每个请求完成后实时输出
+				if err := evaluator.EvalParallelForWithOutput(s); err != nil {
+					fatal("执行错误: %v", err)
+				}
+			} else {
+				// 普通循环：顺序执行（已在回调中输出）
+				if err := evaluator.EvalForCollect(s); err != nil {
+					fatal("执行错误: %v", err)
+				}
+			}
+		case *ast.SeparatorStmt:
+			// 分隔符：跳过
 		}
-
-		// 如果有多个请求，显示总耗时
-		if len(requests) > 1 && !quietMode && !bodyOnly {
-			fmt.Printf("\n\033[2mTotal: %d requests in %v\033[0m\n", len(requests), time.Since(totalStart).Round(time.Millisecond))
+	}
+	
+	// 显示并行执行统计（如果有）
+	if !quietMode && !bodyOnly {
+		all := evaluator.GetAllParallelStats()
+		if len(all) > 0 {
+			for idx, stats := range all {
+				printParallelStats(stats, idx+1, time.Since(totalStart))
+			}
 		}
 	}
 
@@ -393,7 +389,7 @@ func saveToFile(resp *request.Response) {
 	}
 }
 
-func printResponse(resp *request.Response, totalTime time.Duration) {
+func printResponse(resp *request.Response, totalTime time.Duration, req map[string]interface{}) {
 	// body-only 模式：只输出原始 body
 	if bodyOnly {
 		if jsonData, err := resp.JSON(); err == nil {
@@ -413,6 +409,45 @@ func printResponse(resp *request.Response, totalTime time.Duration) {
 	red := "\033[31m"
 	cyan := "\033[36m"
 	yellow := "\033[33m"
+	magenta := "\033[35m"
+
+	// verbose 模式：显示请求信息
+	if verboseMode && req != nil {
+		// 提取 METHOD 和 URL
+		var method, url string
+		for k, v := range req {
+			if k != "headers" && k != "body" {
+				method = strings.ToUpper(k)
+				if str, ok := v.(string); ok {
+					url = str
+				} else {
+					url = fmt.Sprintf("%v", v)
+				}
+				break
+			}
+		}
+		
+		if method != "" && url != "" {
+			fmt.Printf("%s%s%s %s%s%s\n", bold, magenta, method, reset, url, reset)
+		}
+		
+		// Request Headers
+		if headers, ok := req["headers"].(map[string]interface{}); ok && len(headers) > 0 {
+			fmt.Printf("%s%sRequest Headers%s\n", bold, cyan, reset)
+			for k, v := range headers {
+				fmt.Printf("  %s%s%s: %s\n", dim, k, reset, fmt.Sprintf("%v", v))
+			}
+		}
+		
+		// Request Body
+		if body, ok := req["body"]; ok && body != nil {
+			fmt.Printf("%s%sRequest Body%s\n", bold, cyan, reset)
+			bodyStr := formatRequestBody(body)
+			fmt.Println(bodyStr)
+		}
+		
+		fmt.Println(dim + strings.Repeat("─", 50) + reset)
+	}
 
 	// 状态颜色
 	statusColor := green
@@ -441,8 +476,8 @@ func printResponse(resp *request.Response, totalTime time.Duration) {
 	}
 	fmt.Println(dim + strings.Repeat("─", 50) + reset)
 
-	// Body
-	fmt.Printf("%s%sBody%s\n", bold, cyan, reset)
+	// Response Body
+	fmt.Printf("%s%sResponse Body%s\n", bold, cyan, reset)
 	
 	// 尝试格式化 JSON
 	if jsonData, err := resp.JSON(); err == nil {
@@ -458,6 +493,25 @@ func printResponse(resp *request.Response, totalTime time.Duration) {
 			fmt.Println(body)
 		}
 	}
+}
+
+// formatRequestBody 格式化请求体用于显示
+func formatRequestBody(body interface{}) string {
+	// 尝试格式化为 JSON
+	if bodyMap, ok := body.(map[string]interface{}); ok {
+		formatted, err := json.MarshalIndent(bodyMap, "", "  ")
+		if err == nil {
+			return string(formatted)
+		}
+	}
+	if bodySlice, ok := body.([]interface{}); ok {
+		formatted, err := json.MarshalIndent(bodySlice, "", "  ")
+		if err == nil {
+			return string(formatted)
+		}
+	}
+	// 其他类型直接转字符串
+	return fmt.Sprintf("%v", body)
 }
 
 // formatJSONWithLimit 格式化 JSON，如果太长则只显示顶层结构

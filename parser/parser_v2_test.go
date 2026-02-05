@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/LingHeChen/haiku/eval"
@@ -262,6 +263,91 @@ parallel 2 for $id in $ids
 		want := fmt.Sprintf("https://api.example.com/users/%d", id)
 		if !seen[want] {
 			t.Fatalf("missing request url: %s", want)
+		}
+	}
+}
+
+func TestParserV2NumericForLoop(t *testing.T) {
+	// Test: for $i in 10
+	input := `
+for $i in 5
+  get "https://api.example.com/users/$i"
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	if len(requests) != 5 {
+		t.Fatalf("expected 5 requests, got %d", len(requests))
+	}
+
+	// Verify URLs contain 0-4
+	seen := make(map[int]bool)
+	for _, req := range requests {
+		url, _ := req["get"].(string)
+		for i := 0; i < 5; i++ {
+			if strings.Contains(url, fmt.Sprintf("%d", i)) {
+				seen[i] = true
+			}
+		}
+	}
+
+	if len(seen) < 3 {
+		t.Errorf("expected to see multiple indices, got %d unique", len(seen))
+	}
+}
+
+func TestParserV2SimplifiedNumericForLoop(t *testing.T) {
+	// Test: for 5 (simplified syntax)
+	input := `
+for 3
+  post "https://api.example.com/users"
+  body
+    index $index
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 requests, got %d", len(requests))
+	}
+
+	// Verify body contains index values 0, 1, 2
+	for i, req := range requests {
+		body, ok := req["body"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("request %d: expected body to be map", i)
+		}
+		indexVal, ok := body["index"]
+		if !ok {
+			t.Fatalf("request %d: expected 'index' field in body", i)
+		}
+		// Index should be 0, 1, or 2 (order may vary, but values should be present)
+		idx, ok := indexVal.(int64)
+		if !ok {
+			t.Errorf("request %d: expected index to be int64, got %T", i, indexVal)
+		}
+		if idx < 0 || idx >= 3 {
+			t.Errorf("request %d: expected index in [0, 2], got %d", i, idx)
 		}
 	}
 }
