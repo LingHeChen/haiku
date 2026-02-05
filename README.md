@@ -155,7 +155,7 @@ Variables can hold simple values, complex objects, or arrays:
 # Simple values
 @base_url "https://api.example.com"
 @token "Bearer xxx"
-@timeout 30
+@timeout 30s  # Global default timeout (see Timeout Configuration section)
 
 # Objects using indentation
 @user
@@ -243,6 +243,53 @@ delete "https://api.example.com/users/$_.data.0.id"
 | `$_.field`        | Top-level field                    |
 | `$_.data.user.id` | Nested field                       |
 | `$_.items.0.name` | Array element (0-indexed)          |
+
+### Timeout Configuration
+
+Configure request timeouts globally or per-request:
+
+```haiku
+# Global default timeout (30 seconds)
+@timeout 30s
+
+# Request 1: uses global timeout
+get "https://api.example.com/users"
+
+---
+
+# Request 2: override with request-level timeout
+get "https://api.example.com/slow-endpoint"
+timeout 60s
+
+---
+
+# Request 3: use milliseconds
+post "https://api.example.com/upload"
+timeout 5000ms
+
+---
+
+# Request 4: use minutes
+get "https://api.example.com/report"
+timeout 2m
+
+---
+
+# Request 5: numeric value (defaults to seconds)
+get "https://api.example.com/health"
+timeout 10
+```
+
+**Timeout Priority:**
+1. Request-level timeout (highest priority)
+2. Global timeout (`@timeout` variable)
+3. Default (30 seconds)
+
+**Supported Time Units:**
+- `s`, `sec`, `second`, `seconds` - seconds
+- `ms`, `msec`, `millisecond`, `milliseconds` - milliseconds
+- `m`, `min`, `minute`, `minutes` - minutes
+- Numeric value without unit defaults to seconds
 
 ### For Loop
 
@@ -409,8 +456,8 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 - [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
 - [x] For loop: iterate over arrays with `for $item in $items`
+- [x] Timeout configuration: global and per-request timeouts with multiple time units
 - [ ] Retry with backoff
-- [ ] Timeout configuration
 - [ ] Follow redirects option
 - [ ] Proxy support
 - [ ] Cookie jar
