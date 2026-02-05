@@ -224,6 +224,16 @@ for $user in $users
 
 This generates 3 POST requests, one for each user.
 
+**With index variable:**
+
+```haiku
+for $index, $user in $users
+  post "https://api.example.com/users"
+  body
+    position $index
+    name $user.name
+```
+
 ## Type Inference
 
 Values are automatically inferred:

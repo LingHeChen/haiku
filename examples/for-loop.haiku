@@ -7,7 +7,7 @@
   {"id": 3, "name": "Charlie"}
 ]`
 
-# 遍历数组，对每个用户发送请求
+# 基本循环
 for $user in $users
   post "https://httpbin.org/post"
   headers
@@ -15,5 +15,14 @@ for $user in $users
   body
     user_id $user.id
     user_name $user.name
-    action "process"
+
+---
+
+# 带索引的循环
+for $index, $user in $users
+  post "https://httpbin.org/post"
+  body
+    position $index
+    user_id $user.id
+    user_name $user.name
 

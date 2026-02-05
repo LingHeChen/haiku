@@ -181,13 +181,16 @@ func (p *ParserV2) parseForStmt() *ast.ForStmt {
 	p.nextToken()
 
 	// Check for optional index variable: for $i, $item in ...
-	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "," {
-		p.nextToken()
+	if p.curTokenIs(lexer.COMMA) {
 		stmt.IndexVar = firstVar
-		if !p.expectPeek(lexer.DOLLAR) {
+		p.nextToken() // skip comma
+		if !p.curTokenIs(lexer.DOLLAR) {
+			p.addError("expected $ after comma in for statement")
 			return nil
 		}
-		if !p.expectPeek(lexer.IDENT) {
+		p.nextToken() // skip $
+		if !p.curTokenIs(lexer.IDENT) {
+			p.addError("expected identifier after $ in for statement")
 			return nil
 		}
 		stmt.ItemVar = p.curToken.Literal

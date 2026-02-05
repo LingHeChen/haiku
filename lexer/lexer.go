@@ -46,6 +46,7 @@ const (
 	AT          // @
 	DOLLAR      // $
 	DOT         // .
+	COMMA       // ,
 	UNDERSCORE  // _ (as null)
 	EMPTY_ARRAY // []
 	EMPTY_OBJ   // {}
@@ -82,6 +83,7 @@ var tokenNames = map[TokenType]string{
 	AT:          "AT",
 	DOLLAR:      "DOLLAR",
 	DOT:         "DOT",
+	COMMA:       "COMMA",
 	UNDERSCORE:  "UNDERSCORE",
 	EMPTY_ARRAY: "EMPTY_ARRAY",
 	EMPTY_OBJ:   "EMPTY_OBJ",
@@ -231,6 +233,11 @@ func (l *Lexer) NextToken() Token {
 	case '.':
 		tok.Type = DOT
 		tok.Literal = "."
+		l.readChar()
+
+	case ',':
+		tok.Type = COMMA
+		tok.Literal = ","
 		l.readChar()
 
 	case '"':

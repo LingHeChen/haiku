@@ -152,6 +152,53 @@ for $id in $ids
 	}
 }
 
+func TestParserV2ForLoopWithIndex(t *testing.T) {
+	input := `
+@users json` + "`" + `[{"name": "Alice"}, {"name": "Bob"}]` + "`" + `
+
+for $index, $user in $users
+  post "https://api.example.com/users"
+  body
+    index $index
+    name $user.name
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	fmt.Printf("Parsed %d statements\n", len(program.Statements))
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	fmt.Printf("Generated %d requests\n", len(requests))
+	for i, req := range requests {
+		jsonBytes, _ := json.MarshalIndent(req, "", "  ")
+		fmt.Printf("Request %d:\n%s\n\n", i+1, string(jsonBytes))
+	}
+
+	// Verify index values
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(requests))
+	}
+	
+	body0 := requests[0]["body"].(map[string]interface{})
+	if body0["index"] != int64(0) {
+		t.Errorf("expected index 0, got %v", body0["index"])
+	}
+	
+	body1 := requests[1]["body"].(map[string]interface{})
+	if body1["index"] != int64(1) {
+		t.Errorf("expected index 1, got %v", body1["index"])
+	}
+}
+
 func TestParserV2ForLoopFile(t *testing.T) {
 	content, err := os.ReadFile("../examples/for-loop.haiku")
 	if err != nil {
