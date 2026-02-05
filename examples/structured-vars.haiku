@@ -1,0 +1,30 @@
+# 结构化变量示例
+
+# 简单值
+@api_url "https://httpbin.org"
+@timeout 30
+
+# 使用处理器定义复杂变量
+@config json`{"debug": true, "retries": 3}`
+
+# 使用缩进定义对象
+@user
+  name John
+  age 25
+  role admin
+
+# 使用缩进定义数组
+@tags
+  api
+  http
+  test
+
+# 使用变量
+post "$api_url/post"
+headers
+  Content-Type "application/json"
+body
+  user $user
+  config $config
+  tags $tags
+  timeout $timeout

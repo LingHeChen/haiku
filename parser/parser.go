@@ -39,6 +39,7 @@ type Value struct {
 	Bool        *Boolean         `parser:"| @('true' | 'false')"`
 	EmptyArray  *string          `parser:"| @EmptyArray"`  // 空数组 []
 	EmptyObject *string          `parser:"| @EmptyObject"` // 空对象 {}
+	VarRef      *string          `parser:"| @VarRef"`      // 变量引用 $var, $env.VAR
 	Raw         *string          `parser:"| @Ident"`       // 处理无引号字符串
 
 	// 嵌套结构：预处理会把缩进变成 { ... }
@@ -157,6 +158,10 @@ func (v *Value) MarshalJSON() ([]byte, error) {
 	if v.EmptyObject != nil {
 		return []byte("{}"), nil
 	}
+	if v.VarRef != nil {
+		// 变量引用，作为字符串保留（后续在 Map 级别替换）
+		return json.Marshal(v.VarRef)
+	}
 	if v.Raw != nil {
 		// 处理 _ 作为 null
 		if *v.Raw == "_" {
@@ -254,11 +259,17 @@ func preprocess(input string) string {
 // 变量处理
 // ---------------------------------------------------------
 
-// 变量定义正则: @name "value" 或 @name value（等号可选）
-var varDefRegex = regexp.MustCompile(`^\s*@(\w+)\s*=?\s*"?([^"]*)"?\s*$`)
+// 变量定义正则: @name 开头（支持单行和多行）
+var varDefStartRegex = regexp.MustCompile(`^(\s*)@(\w+)\s*=?\s*(.*)$`)
+
+// 处理器字符串正则（用于变量值）
+var varProcessorRegex = regexp.MustCompile("^([a-zA-Z_][a-zA-Z0-9_]*)`([^`]*)`$")
 
 // 新变量引用正则: $var, $env.VAR, $_.field
 var varRefRegex = regexp.MustCompile(`\$(\w+(?:\.\w+)*)`)
+
+// 完整变量引用正则（用于检测值是否完全是变量引用）
+var fullVarRefRegex = regexp.MustCompile(`^\$(\w+)$`)
 
 // 旧变量引用正则（兼容）: {{name}} 或 {{$ENV_VAR}}
 var legacyVarRefRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
@@ -266,51 +277,185 @@ var legacyVarRefRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 // import 正则: import "filename"
 var importRegex = regexp.MustCompile(`^\s*import\s+"([^"]+)"`)
 
-// extractVariables 从输入中提取变量定义
-func extractVariables(input string) map[string]string {
-	vars := make(map[string]string)
+// extractStructuredVariables 从输入中提取结构化变量定义
+// 支持简单值、处理器和多行缩进
+func extractStructuredVariables(input string, basePath string) map[string]interface{} {
+	vars := make(map[string]interface{})
 	lines := strings.Split(input, "\n")
+	i := 0
 
-	for _, line := range lines {
-		if matches := varDefRegex.FindStringSubmatch(line); matches != nil {
-			name := matches[1]
-			value := matches[2]
-			vars[name] = value
+	for i < len(lines) {
+		line := lines[i]
+
+		// 处理 import
+		if matches := importRegex.FindStringSubmatch(line); matches != nil {
+			importPath := matches[1]
+			if basePath != "" && !strings.HasPrefix(importPath, "/") {
+				importPath = basePath + "/" + importPath
+			}
+			if content, err := os.ReadFile(importPath); err == nil {
+				importedVars := extractStructuredVariables(string(content), dirPath(importPath))
+				for k, v := range importedVars {
+					vars[k] = v
+				}
+			}
+			i++
+			continue
 		}
+
+		// 处理变量定义 @name ...
+		if matches := varDefStartRegex.FindStringSubmatch(line); matches != nil {
+			baseIndent := matches[1]
+			varName := matches[2]
+			valueStr := strings.TrimSpace(matches[3])
+
+			if valueStr != "" {
+				// 同一行有值
+				vars[varName] = parseVariableValue(valueStr)
+			} else {
+				// 多行缩进块
+				rawLines := []string{}
+				baseIndentLen := len(baseIndent)
+				i++
+
+				// 收集缩进的子行（保留原始内容）
+				for i < len(lines) {
+					nextLine := lines[i]
+					if strings.TrimSpace(nextLine) == "" {
+						// 空行保留
+						rawLines = append(rawLines, "")
+						i++
+						continue
+					}
+
+					// 计算缩进
+					trimmed := strings.TrimLeft(nextLine, " \t")
+					currentIndent := len(nextLine) - len(trimmed)
+
+					// 如果缩进比变量定义行更深，属于这个块
+					if currentIndent > baseIndentLen {
+						rawLines = append(rawLines, nextLine)
+						i++
+					} else {
+						// 缩进结束，退出
+						break
+					}
+				}
+
+				// 找到最小公共缩进并去除
+				if len(rawLines) > 0 {
+					minIndent := -1
+					for _, line := range rawLines {
+						if strings.TrimSpace(line) == "" {
+							continue
+						}
+						trimmed := strings.TrimLeft(line, " \t")
+						indent := len(line) - len(trimmed)
+						if minIndent == -1 || indent < minIndent {
+							minIndent = indent
+						}
+					}
+
+					// 去除最小公共缩进
+					blockLines := make([]string, len(rawLines))
+					for j, line := range rawLines {
+						if strings.TrimSpace(line) == "" || len(line) < minIndent {
+							blockLines[j] = ""
+						} else {
+							blockLines[j] = line[minIndent:]
+						}
+					}
+
+					blockContent := strings.Join(blockLines, "\n")
+					vars[varName] = parseBlockToValue(blockContent)
+				}
+				continue
+			}
+			i++
+			continue
+		}
+
+		i++
 	}
 
 	return vars
 }
 
-// extractVariablesWithImports 从输入中提取变量，支持 import
-func extractVariablesWithImports(input string, basePath string) map[string]string {
-	vars := make(map[string]string)
-	lines := strings.Split(input, "\n")
+// parseVariableValue 解析变量值（单行）
+func parseVariableValue(valueStr string) interface{} {
+	// 检查是否是处理器语法 processor`content`
+	if matches := varProcessorRegex.FindStringSubmatch(valueStr); matches != nil {
+		processor := matches[1]
+		content := matches[2]
+		return processString(processor, content)
+	}
 
-	for _, line := range lines {
-		// 处理 import
-		if matches := importRegex.FindStringSubmatch(line); matches != nil {
-			importPath := matches[1]
-			// 相对路径处理
-			if basePath != "" && !strings.HasPrefix(importPath, "/") {
-				importPath = basePath + "/" + importPath
-			}
-			// 读取导入的文件
-			if content, err := os.ReadFile(importPath); err == nil {
-				// 递归提取变量（支持嵌套 import）
-				importedVars := extractVariablesWithImports(string(content), dirPath(importPath))
-				for k, v := range importedVars {
-					vars[k] = v
-				}
-			}
-			continue
+	// 检查是否是带引号的字符串
+	if len(valueStr) >= 2 && valueStr[0] == '"' && valueStr[len(valueStr)-1] == '"' {
+		return valueStr[1 : len(valueStr)-1]
+	}
+
+	// 使用类型推断
+	return inferType(valueStr)
+}
+
+// parseBlockToValue 将缩进块解析为结构化值
+func parseBlockToValue(blockContent string) interface{} {
+	// 使用现有的解析逻辑
+	p, err := New()
+	if err != nil {
+		return blockContent
+	}
+
+	// 预处理（缩进 → 大括号）
+	bracedCode := preprocess(blockContent)
+
+	// 解析
+	config, err := p.parser.ParseString("", bracedCode)
+	if err != nil {
+		return blockContent
+	}
+
+	// 判断是对象还是数组
+	if len(config.Entries) == 0 {
+		return map[string]interface{}{}
+	}
+
+	// 检查是否是列表
+	isList := true
+	for _, e := range config.Entries {
+		if e.Key != "" && e.Value != nil {
+			isList = false
+			break
 		}
+	}
 
-		// 处理变量定义
-		if matches := varDefRegex.FindStringSubmatch(line); matches != nil {
-			name := matches[1]
-			value := matches[2]
-			vars[name] = value
+	if isList {
+		return config.ToSlice()
+	}
+	return config.ToMap()
+}
+
+// extractVariablesWithImports 从输入中提取变量（兼容旧接口，返回字符串 map）
+func extractVariablesWithImports(input string, basePath string) map[string]string {
+	structuredVars := extractStructuredVariables(input, basePath)
+	vars := make(map[string]string)
+
+	for k, v := range structuredVars {
+		switch val := v.(type) {
+		case string:
+			vars[k] = val
+		case int64:
+			vars[k] = strconv.FormatInt(val, 10)
+		case float64:
+			vars[k] = strconv.FormatFloat(val, 'f', -1, 64)
+		case bool:
+			vars[k] = strconv.FormatBool(val)
+		default:
+			// 复杂类型转为 JSON
+			if jsonBytes, err := json.Marshal(val); err == nil {
+				vars[k] = string(jsonBytes)
+			}
 		}
 	}
 
@@ -393,9 +538,10 @@ var haikuLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"`},
 	{Name: "Float", Pattern: `\d+\.\d+`},
 	{Name: "Int", Pattern: `\d+`},
-	{Name: "EmptyArray", Pattern: `\[\]`},   // 空数组
-	{Name: "EmptyObject", Pattern: `\{\}`},  // 空对象
-	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_-]*`}, // 支持连字符
+	{Name: "EmptyArray", Pattern: `\[\]`},                        // 空数组
+	{Name: "EmptyObject", Pattern: `\{\}`},                       // 空对象
+	{Name: "VarRef", Pattern: `\$[a-zA-Z_][a-zA-Z0-9_.]*`},       // 变量引用 $var, $env.VAR
+	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_-]*`},          // 支持连字符
 	{Name: "Punct", Pattern: `[{};]`},
 	{Name: "Whitespace", Pattern: `[ \t]+`},
 })
@@ -544,6 +690,10 @@ func (v *Value) ToInterface() interface{} {
 	if v.EmptyObject != nil {
 		return map[string]interface{}{}
 	}
+	if v.VarRef != nil {
+		// 变量引用，作为字符串返回（后续在 Map 级别替换）
+		return *v.VarRef
+	}
 	if v.Raw != nil {
 		// 智能类型推断
 		return inferType(*v.Raw)
@@ -680,22 +830,38 @@ func getNestedValue(data interface{}, path string) interface{} {
 }
 
 // ExtractVariables 从整个输入中提取变量（包括 import）
-// 用于在分割请求之前提取全局变量
+// 用于在分割请求之前提取全局变量（返回字符串 map，兼容旧代码）
 func ExtractVariables(input string, basePath string) map[string]string {
 	return extractVariablesWithImports(input, basePath)
 }
 
-// ParseToMapWithResponse 解析请求，支持上一个响应的引用
-func (p *Parser) ParseToMapWithResponse(input string, basePath string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
-	// 从当前请求块提取变量
-	vars := extractVariablesWithImports(input, basePath)
-	return p.ParseToMapWithVars(input, vars, prevResponse)
+// ExtractStructuredVariables 从整个输入中提取结构化变量（包括 import）
+// 返回 map[string]interface{}，支持数组、对象等复杂类型
+func ExtractStructuredVariables(input string, basePath string) map[string]interface{} {
+	return extractStructuredVariables(input, basePath)
 }
 
-// ParseToMapWithVars 解析请求，使用预先提取的变量
+// ParseToMapWithResponse 解析请求，支持上一个响应的引用
+func (p *Parser) ParseToMapWithResponse(input string, basePath string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
+	// 从当前请求块提取结构化变量
+	vars := extractStructuredVariables(input, basePath)
+	return p.ParseToMapWithStructuredVars(input, vars, prevResponse)
+}
+
+// ParseToMapWithVars 解析请求，使用预先提取的变量（兼容旧接口）
 func (p *Parser) ParseToMapWithVars(input string, vars map[string]string, prevResponse map[string]interface{}) (map[string]interface{}, error) {
-	// 1. 替换变量引用（不替换 $_ 响应引用，留到后面处理）
-	input = substituteVariablesOnly(input, vars)
+	// 转换为结构化变量
+	structuredVars := make(map[string]interface{})
+	for k, v := range vars {
+		structuredVars[k] = v
+	}
+	return p.ParseToMapWithStructuredVars(input, structuredVars, prevResponse)
+}
+
+// ParseToMapWithStructuredVars 解析请求，使用结构化变量
+func (p *Parser) ParseToMapWithStructuredVars(input string, vars map[string]interface{}, prevResponse map[string]interface{}) (map[string]interface{}, error) {
+	// 1. 移除变量定义行（避免被解析为请求内容）
+	input = removeVariableDefinitions(input)
 
 	// 2. 预处理（缩进 → 大括号）
 	bracedCode := preprocess(input)
@@ -709,12 +875,66 @@ func (p *Parser) ParseToMapWithVars(input string, vars map[string]string, prevRe
 	// 4. 转换为 Map
 	result := config.ToMap()
 
-	// 5. 在 Map 级别替换 $_ 响应引用（保留 JSON 结构）
+	// 5. 在 Map 级别替换变量引用（支持结构化值）
+	if len(vars) > 0 {
+		result = substituteVariablesInMap(result, vars).(map[string]interface{})
+	}
+
+	// 6. 在 Map 级别替换 $_ 响应引用（保留 JSON 结构）
 	if prevResponse != nil {
 		result = substituteResponseInMap(result, prevResponse).(map[string]interface{})
 	}
 
 	return result, nil
+}
+
+// removeVariableDefinitions 移除输入中的变量定义行
+func removeVariableDefinitions(input string) string {
+	lines := strings.Split(input, "\n")
+	var result []string
+	i := 0
+
+	for i < len(lines) {
+		line := lines[i]
+
+		// 跳过 import 行
+		if importRegex.MatchString(line) {
+			i++
+			continue
+		}
+
+		// 跳过变量定义行及其缩进块
+		if matches := varDefStartRegex.FindStringSubmatch(line); matches != nil {
+			baseIndent := matches[1]
+			baseIndentLen := len(baseIndent)
+			valueStr := strings.TrimSpace(matches[3])
+
+			i++
+			// 如果同一行没有值，跳过后续缩进块
+			if valueStr == "" {
+				for i < len(lines) {
+					nextLine := lines[i]
+					if strings.TrimSpace(nextLine) == "" {
+						i++
+						continue
+					}
+					trimmed := strings.TrimLeft(nextLine, " \t")
+					currentIndent := len(nextLine) - len(trimmed)
+					if currentIndent > baseIndentLen {
+						i++
+					} else {
+						break
+					}
+				}
+			}
+			continue
+		}
+
+		result = append(result, line)
+		i++
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // substituteVariablesOnly 只替换普通变量和环境变量，不处理 $_ 响应引用
@@ -792,6 +1012,84 @@ func substituteResponseInMap(v interface{}, prevResponse map[string]interface{})
 	default:
 		return val
 	}
+}
+
+// substituteVariablesInMap 在 Map 级别替换变量引用（支持结构化值）
+func substituteVariablesInMap(v interface{}, vars map[string]interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{})
+		for k, v := range val {
+			result[k] = substituteVariablesInMap(v, vars)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, v := range val {
+			result[i] = substituteVariablesInMap(v, vars)
+		}
+		return result
+	case string:
+		return resolveVariableRef(val, vars)
+	default:
+		return val
+	}
+}
+
+// resolveVariableRef 解析变量引用并返回实际值
+func resolveVariableRef(val string, vars map[string]interface{}) interface{} {
+	// 检查是否是完整的变量引用 $varname（不含其他字符）
+	if matches := fullVarRefRegex.FindStringSubmatch(val); matches != nil {
+		varName := matches[1]
+		// 跳过 $_ 响应引用和 $env 环境变量
+		if varName != "_" && !strings.HasPrefix(varName, "env") {
+			if varVal, ok := vars[varName]; ok {
+				return varVal // 返回结构化值
+			}
+		}
+	}
+
+	// 处理字符串内插（只替换字符串类型的变量）
+	result := varRefRegex.ReplaceAllStringFunc(val, func(match string) string {
+		name := match[1:] // 去掉 $
+
+		// 响应引用 $_ 保留
+		if strings.HasPrefix(name, "_") {
+			return match
+		}
+
+		// 环境变量引用: $env.VAR
+		if strings.HasPrefix(name, "env.") {
+			envName := name[4:]
+			if envVal := os.Getenv(envName); envVal != "" {
+				return envVal
+			}
+			return match
+		}
+
+		// 普通变量 - 只有字符串类型才能内插
+		if varVal, ok := vars[name]; ok {
+			switch v := varVal.(type) {
+			case string:
+				return v
+			case int64:
+				return strconv.FormatInt(v, 10)
+			case float64:
+				return strconv.FormatFloat(v, 'f', -1, 64)
+			case bool:
+				return strconv.FormatBool(v)
+			default:
+				// 复杂类型转为 JSON
+				if jsonBytes, err := json.Marshal(v); err == nil {
+					return string(jsonBytes)
+				}
+			}
+		}
+
+		return match
+	})
+
+	return result
 }
 
 // resolveResponseRef 解析 $_ 引用并返回实际值

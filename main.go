@@ -180,8 +180,8 @@ func showParsed(input string, basePath string) {
 		fatal("初始化解析器失败: %v", err)
 	}
 
-	// 先从整个文件提取变量（确保 import 和变量定义对所有请求可用）
-	vars := parser.ExtractVariables(input, basePath)
+	// 先从整个文件提取结构化变量（支持数组、对象等复杂类型）
+	vars := parser.ExtractStructuredVariables(input, basePath)
 
 	// 分割多个请求
 	requests := parser.SplitRequests(input)
@@ -193,7 +193,7 @@ func showParsed(input string, basePath string) {
 			fmt.Printf("--- Request %d ---\n", i+1)
 		}
 		
-		mapData, err := p.ParseToMapWithVars(reqInput, vars, prevResponse)
+		mapData, err := p.ParseToMapWithStructuredVars(reqInput, vars, prevResponse)
 		if err != nil {
 			fatal("解析错误: %v", err)
 		}
@@ -217,8 +217,8 @@ func execute(input string, basePath string) {
 		fatal("初始化解析器失败: %v", err)
 	}
 
-	// 先从整个文件提取变量（确保 import 和变量定义对所有请求可用）
-	vars := parser.ExtractVariables(input, basePath)
+	// 先从整个文件提取结构化变量（支持数组、对象等复杂类型）
+	vars := parser.ExtractStructuredVariables(input, basePath)
 
 	// 分割多个请求（用 --- 分隔）
 	requests := parser.SplitRequests(input)
@@ -235,8 +235,8 @@ func execute(input string, basePath string) {
 
 		start := time.Now()
 		
-		// 解析，传入全局变量和上一个响应
-		mapData, err := p.ParseToMapWithVars(reqInput, vars, prevResponse)
+		// 解析，传入结构化变量和上一个响应
+		mapData, err := p.ParseToMapWithStructuredVars(reqInput, vars, prevResponse)
 		if err != nil {
 			fatal("解析错误: %v", err)
 		}

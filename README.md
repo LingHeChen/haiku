@@ -107,15 +107,37 @@ body
 
 ### Variables
 
+Variables can hold simple values, complex objects, or arrays:
+
 ```haiku
-# Define variables
+# Simple values
 @base_url "https://api.example.com"
 @token "Bearer xxx"
+@timeout 30
 
-# Use variables with $var syntax
-get "$base_url/users"
+# Objects using indentation
+@user
+  name John
+  age 25
+  role admin
+
+# Arrays using indentation
+@tags
+  api
+  http
+  test
+
+# Complex objects using json processor
+@config json`{"debug": true, "retries": 3}`
+
+# Use variables
+post "$base_url/users"
 headers
   Authorization "$token"
+body
+  user $user
+  tags $tags
+  config $config
 ```
 
 ### Environment Variables
@@ -252,6 +274,7 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 - [x] Shorter variable syntax: `$var` instead of `{{var}}`
 - [x] Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
 - [x] String processors: json\`...\` and base64\`...\` for inline data embedding
+- [x] Structured variables: objects and arrays using indentation or json\`...\`
 - [ ] URL without quotes: `get https://api.com` instead of `get "https://api.com"`
 - [ ] Auto-detect method: no body = GET, has body = POST
 - [ ] Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
