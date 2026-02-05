@@ -202,6 +202,27 @@ delete "https://api.example.com/users/$_.data.0.id"
 | `$_.data.user.id` | Nested field                       |
 | `$_.items.0.name` | Array element (0-indexed)          |
 
+### For Loop
+
+Iterate over arrays to send multiple requests:
+
+```haiku
+@users json`[
+  {"id": 1, "name": "Alice"},
+  {"id": 2, "name": "Bob"},
+  {"id": 3, "name": "Charlie"}
+]`
+
+for $user in $users
+  post "https://api.example.com/users"
+  headers
+    Content-Type "application/json"
+  body
+    user_id $user.id
+    user_name $user.name
+```
+
+This generates 3 POST requests, one for each user.
 
 ## Type Inference
 
@@ -283,6 +304,7 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 ### Request Features
 
 - [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
+- [x] For loop: iterate over arrays with `for $item in $items`
 - [ ] Retry with backoff
 - [ ] Timeout configuration
 - [ ] Follow redirects option

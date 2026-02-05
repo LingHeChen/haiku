@@ -1,0 +1,19 @@
+# For 循环示例
+
+# 定义用户数组
+@users json`[
+  {"id": 1, "name": "Alice"},
+  {"id": 2, "name": "Bob"},
+  {"id": 3, "name": "Charlie"}
+]`
+
+# 遍历数组，对每个用户发送请求
+for $user in $users
+  post "https://httpbin.org/post"
+  headers
+    Content-Type "application/json"
+  body
+    user_id $user.id
+    user_name $user.name
+    action "process"
+

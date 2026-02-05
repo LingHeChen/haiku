@@ -1,0 +1,181 @@
+package parser
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"testing"
+
+	"github.com/LingHeChen/haiku/eval"
+	"github.com/LingHeChen/haiku/lexer"
+)
+
+func TestLexer(t *testing.T) {
+	input := `
+@name "John"
+@age 25
+
+get "https://api.example.com/users"
+headers
+  Content-Type "application/json"
+body
+  name $name
+  age $age
+`
+	tokens := lexer.Tokenize(input)
+	for _, tok := range tokens {
+		fmt.Println(tok)
+	}
+}
+
+func TestParserV2Basic(t *testing.T) {
+	input := `
+@name "John"
+@age 25
+
+get "https://api.example.com/users"
+headers
+  Content-Type "application/json"
+body
+  name $name
+  age $age
+`
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	fmt.Printf("Parsed %d statements\n", len(program.Statements))
+	for i, stmt := range program.Statements {
+		fmt.Printf("  [%d] %T\n", i, stmt)
+	}
+}
+
+func TestParserV2WithEval(t *testing.T) {
+	input := `
+@name "John"
+@age 25
+
+get "https://api.example.com/users"
+headers
+  Content-Type "application/json"
+body
+  name $name
+  age $age
+`
+	// Set up the import parser
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	fmt.Printf("Generated %d requests\n", len(requests))
+	for i, req := range requests {
+		jsonBytes, _ := json.MarshalIndent(req, "", "  ")
+		fmt.Printf("Request %d:\n%s\n", i+1, string(jsonBytes))
+	}
+}
+
+func TestParserV2StructuredVars(t *testing.T) {
+	input := `
+@user
+  name John
+  age 25
+
+@tags
+  api
+  http
+
+get "https://api.example.com"
+body
+  user $user
+  tags $tags
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(requests))
+	}
+
+	jsonBytes, _ := json.MarshalIndent(requests[0], "", "  ")
+	fmt.Println(string(jsonBytes))
+}
+
+func TestParserV2ForLoop(t *testing.T) {
+	input := `
+@ids json` + "`[1, 2, 3]`" + `
+
+for $id in $ids
+  delete "https://api.example.com/users/$id"
+`
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	fmt.Printf("Parsed %d statements\n", len(program.Statements))
+	for i, stmt := range program.Statements {
+		fmt.Printf("  [%d] %T\n", i, stmt)
+	}
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	fmt.Printf("Generated %d requests\n", len(requests))
+	for i, req := range requests {
+		jsonBytes, _ := json.MarshalIndent(req, "", "  ")
+		fmt.Printf("Request %d:\n%s\n", i+1, string(jsonBytes))
+	}
+}
+
+func TestParserV2ForLoopFile(t *testing.T) {
+	content, err := os.ReadFile("../examples/for-loop.haiku")
+	if err != nil {
+		t.Fatalf("read file error: %v", err)
+	}
+
+	eval.SetImportParser(ParseFile)
+
+	program, err := ParseFile(string(content))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	fmt.Printf("Parsed %d statements\n", len(program.Statements))
+
+	evaluator := eval.NewEvaluator()
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+
+	fmt.Printf("Generated %d requests\n", len(requests))
+	for i, req := range requests {
+		jsonBytes, _ := json.MarshalIndent(req, "", "  ")
+		fmt.Printf("Request %d:\n%s\n\n", i+1, string(jsonBytes))
+	}
+}
