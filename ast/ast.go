@@ -61,13 +61,14 @@ func (s *VarDefStmt) nodeType() string  { return "VarDefStmt" }
 func (s *VarDefStmt) Pos() Position     { return s.Position }
 func (s *VarDefStmt) statementNode()    {}
 
-// RequestStmt: get "url" headers ... body ...
+// RequestStmt: get "url" headers ... body ... timeout ...
 type RequestStmt struct {
 	Position Position
 	Method   string
 	URL      Expression
 	Headers  *BlockExpr
 	Body     Expression // can be BlockExpr or other Expression
+	Timeout  Expression // optional timeout expression (e.g., 30, "30s", "5000ms")
 }
 
 func (s *RequestStmt) nodeType() string  { return "RequestStmt" }

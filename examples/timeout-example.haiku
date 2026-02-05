@@ -1,0 +1,31 @@
+# Timeout 功能示例
+
+# 全局默认 timeout（30 秒）
+@timeout 30s
+
+# 请求 1: 使用全局 timeout
+get "https://httpbin.org/delay/2"
+
+---
+
+# 请求 2: 使用请求级 timeout（覆盖全局设置）
+get "https://httpbin.org/delay/2"
+timeout 5s
+
+---
+
+# 请求 3: 使用毫秒单位
+get "https://httpbin.org/delay/1"
+timeout 5000ms
+
+---
+
+# 请求 4: 使用分钟单位
+get "https://httpbin.org/delay/1"
+timeout 1m
+
+---
+
+# 请求 5: 使用数字（默认秒）
+get "https://httpbin.org/delay/1"
+timeout 10

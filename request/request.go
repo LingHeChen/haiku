@@ -89,20 +89,41 @@ func (c *Client) Do(mapData map[string]interface{}) (*Response, error) {
 	// 4. 添加请求头
 	applyHeaders(req, mapData)
 
-	// 5. 执行请求
-	resp, err := c.httpClient.Do(req)
+	// 5. 处理 timeout（请求级 timeout 优先于 client 默认 timeout）
+	client := c.httpClient
+	if timeoutVal, ok := mapData["timeout"]; ok {
+		var timeout time.Duration
+		switch v := timeoutVal.(type) {
+		case time.Duration:
+			timeout = v
+		case int64:
+			timeout = time.Duration(v)
+		case float64:
+			timeout = time.Duration(v)
+		default:
+			return nil, fmt.Errorf("invalid timeout type: %T", timeoutVal)
+		}
+		// 创建临时 client 使用指定的 timeout
+		tempClient := &http.Client{
+			Timeout: timeout,
+		}
+		client = tempClient
+	}
+
+	// 6. 执行请求
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 6. 读取响应
+	// 7. 读取响应
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// 7. 构建响应对象
+	// 8. 构建响应对象
 	headers := make(map[string]string)
 	for k, v := range resp.Header {
 		if len(v) > 0 {

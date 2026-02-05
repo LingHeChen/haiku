@@ -221,8 +221,32 @@ func execute(input string, basePath string) {
 	}
 
 	var lastResp *request.Response
-	totalStart := time.Now()
 	requestCount := 0
+	var isParallelRequest bool // 标记当前请求是否来自并行循环
+	
+	// 使用 channel 进行输出，避免锁阻塞
+	type outputMsg struct {
+		resp           *request.Response
+		req            map[string]interface{}
+		duration       time.Duration
+		isParallel     bool
+		requestNumber  int
+	}
+	outputChan := make(chan outputMsg, 100) // 缓冲 channel，避免阻塞
+	outputDone := make(chan struct{})
+	
+	// 启动专门的输出 goroutine
+	go func() {
+		defer close(outputDone)
+		for msg := range outputChan {
+			if !quietMode && !bodyOnly {
+				printResponse(msg.resp, msg.duration, msg.req, msg.isParallel)
+				if msg.requestNumber > 1 {
+					fmt.Println()
+				}
+			}
+		}
+	}()
 	
 	// 创建 evaluator，带请求回调用于实时执行和输出
 	evaluator := eval.NewEvaluator(
@@ -237,11 +261,19 @@ func execute(input string, basePath string) {
 				return nil, err
 			}
 			
-			// 实时输出结果（非并行请求）
-			if !quietMode && !bodyOnly {
-				printResponse(resp, time.Since(start), req)
-				if requestCount > 1 {
-					fmt.Println()
+			// 通过 channel 发送输出消息，非阻塞
+			select {
+			case outputChan <- outputMsg{
+				resp:          resp,
+				req:           req,
+				duration:      time.Since(start),
+				isParallel:    isParallelRequest,
+				requestNumber: requestCount,
+			}:
+			default:
+				// Channel 满了，直接输出（不应该发生，但作为 fallback）
+				if !quietMode && !bodyOnly {
+					printResponse(resp, time.Since(start), req, isParallelRequest)
 				}
 			}
 			
@@ -285,11 +317,14 @@ func execute(input string, basePath string) {
 		case *ast.ForStmt:
 			if s.Parallel {
 				// 并行循环：并发执行，每个请求完成后实时输出
+				isParallelRequest = true
 				if err := evaluator.EvalParallelForWithOutput(s); err != nil {
 					fatal("执行错误: %v", err)
 				}
+				isParallelRequest = false
 			} else {
 				// 普通循环：顺序执行（已在回调中输出）
+				isParallelRequest = false
 				if err := evaluator.EvalForCollect(s); err != nil {
 					fatal("执行错误: %v", err)
 				}
@@ -299,12 +334,16 @@ func execute(input string, basePath string) {
 		}
 	}
 	
+	// 关闭输出 channel，等待所有输出完成
+	close(outputChan)
+	<-outputDone
+	
 	// 显示并行执行统计（如果有）
 	if !quietMode && !bodyOnly {
 		all := evaluator.GetAllParallelStats()
 		if len(all) > 0 {
 			for idx, stats := range all {
-				printParallelStats(stats, idx+1, time.Since(totalStart))
+				printParallelStats(stats, idx+1)
 			}
 		}
 	}
@@ -328,7 +367,7 @@ func containsParallelFor(program *ast.Program) bool {
 }
 
 // printParallelStats 打印并行执行统计
-func printParallelStats(stats map[string]interface{}, loopIndex int, totalTime time.Duration) {
+func printParallelStats(stats map[string]interface{}, loopIndex int) {
 	// 颜色码
 	reset := "\033[0m"
 	bold := "\033[1m"
@@ -365,7 +404,11 @@ func printParallelStats(stats map[string]interface{}, loopIndex int, totalTime t
 		fmt.Printf("  Max Time: %s\n", maxTime)
 	}
 	
-	fmt.Printf("  %sWall Time: %v%s\n", dim, totalTime.Round(time.Millisecond), reset)
+	// Use wall_time from stats if available, otherwise fallback
+	if wallTime, ok := stats["wall_time"].(string); ok {
+		fmt.Printf("  %sWall Time: %s%s\n", dim, wallTime, reset)
+	}
+	
 	fmt.Printf("%s%s══════════════════════════════════%s\n", bold, cyan, reset)
 }
 
@@ -389,7 +432,7 @@ func saveToFile(resp *request.Response) {
 	}
 }
 
-func printResponse(resp *request.Response, totalTime time.Duration, req map[string]interface{}) {
+func printResponse(resp *request.Response, totalTime time.Duration, req map[string]interface{}, isParallel bool) {
 	// body-only 模式：只输出原始 body
 	if bodyOnly {
 		if jsonData, err := resp.JSON(); err == nil {
@@ -410,6 +453,22 @@ func printResponse(resp *request.Response, totalTime time.Duration, req map[stri
 	cyan := "\033[36m"
 	yellow := "\033[33m"
 	magenta := "\033[35m"
+
+	// 并行请求简化输出（除非 verbose 模式）
+	if isParallel && !verboseMode {
+		// 状态颜色
+		statusColor := green
+		if resp.StatusCode >= 400 {
+			statusColor = red
+		} else if resp.StatusCode >= 300 {
+			statusColor = yellow
+		}
+		// 只显示状态码和耗时
+		fmt.Printf("%s%s%s %s(%v)%s\n", 
+			statusColor, resp.Status, reset,
+			dim, resp.Duration.Round(time.Millisecond), reset)
+		return
+	}
 
 	// verbose 模式：显示请求信息
 	if verboseMode && req != nil {
@@ -476,21 +535,25 @@ func printResponse(resp *request.Response, totalTime time.Duration, req map[stri
 	}
 	fmt.Println(dim + strings.Repeat("─", 50) + reset)
 
-	// Response Body
-	fmt.Printf("%s%sResponse Body%s\n", bold, cyan, reset)
+	// Response Body - 检查是否为空
+	bodyStr := resp.String()
+	bodyIsEmpty := len(strings.TrimSpace(bodyStr)) == 0
 	
-	// 尝试格式化 JSON
-	if jsonData, err := resp.JSON(); err == nil {
-		body := formatJSONWithLimit(jsonData)
-		fmt.Println(body)
-	} else {
-		body := resp.String()
-		lines := strings.Split(body, "\n")
-		if len(lines) > maxBodyLines {
-			fmt.Println(strings.Join(lines[:maxBodyLines], "\n"))
-			fmt.Printf("%s... (%d more lines, use -o to save full response)%s\n", dim, len(lines)-maxBodyLines, reset)
-		} else {
+	if !bodyIsEmpty {
+		fmt.Printf("%s%sResponse Body%s\n", bold, cyan, reset)
+		
+		// 尝试格式化 JSON
+		if jsonData, err := resp.JSON(); err == nil {
+			body := formatJSONWithLimit(jsonData)
 			fmt.Println(body)
+		} else {
+			lines := strings.Split(bodyStr, "\n")
+			if len(lines) > maxBodyLines {
+				fmt.Println(strings.Join(lines[:maxBodyLines], "\n"))
+				fmt.Printf("%s... (%d more lines, use -o to save full response)%s\n", dim, len(lines)-maxBodyLines, reset)
+			} else {
+				fmt.Println(bodyStr)
+			}
 		}
 	}
 }

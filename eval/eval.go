@@ -51,6 +51,7 @@ type Evaluator struct {
 	basePath          string
 	requestCallback   func(req map[string]interface{}) (map[string]interface{}, error)
 	collectedRequests []map[string]interface{}
+	defaultTimeout    time.Duration // global default timeout
 }
 
 // EvalOption is a functional option for Evaluator
@@ -73,7 +74,8 @@ func WithRequestCallback(cb func(req map[string]interface{}) (map[string]interfa
 // NewEvaluator creates a new Evaluator
 func NewEvaluator(opts ...EvalOption) *Evaluator {
 	e := &Evaluator{
-		scope: NewScope(nil),
+		scope:          NewScope(nil),
+		defaultTimeout: 30 * time.Second, // default 30 seconds
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -207,6 +209,14 @@ func (e *Evaluator) evalVarDef(stmt *ast.VarDefStmt) error {
 
 	val := e.evalExpr(stmt.Value)
 	e.scope.Set(stmt.Name, val)
+	
+	// Special handling for @timeout variable
+	if stmt.Name == "timeout" {
+		if timeout, err := parseTimeout(val); err == nil {
+			e.defaultTimeout = timeout
+		}
+	}
+	
 	return nil
 }
 
@@ -230,6 +240,19 @@ func (e *Evaluator) evalRequest(stmt *ast.RequestStmt) (map[string]interface{}, 
 	if stmt.Body != nil {
 		bodyVal := e.evalExpr(stmt.Body)
 		req["body"] = bodyVal
+	}
+
+	// Timeout: request-level timeout takes precedence over global timeout
+	if stmt.Timeout != nil {
+		timeoutVal := e.evalExpr(stmt.Timeout)
+		if timeout, err := parseTimeout(timeoutVal); err == nil {
+			req["timeout"] = timeout
+		} else {
+			return nil, fmt.Errorf("invalid timeout value: %v", timeoutVal)
+		}
+	} else if e.defaultTimeout > 0 {
+		// Use global default timeout if no request-level timeout specified
+		req["timeout"] = e.defaultTimeout
 	}
 
 	return req, nil
@@ -293,7 +316,11 @@ func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
 	}
 
 	// Handle parallel execution
+	// Note: When called from EvalToRequests (no callback), we still need to collect requests
+	// When called from main.go with callback, EvalParallelForWithOutput is used instead
 	if stmt.Parallel {
+		// For request collection (no callback), use evalParallelFor but disable output
+		// For execution (with callback), EvalParallelForWithOutput is used in main.go
 		return e.evalParallelFor(stmt, items)
 	}
 
@@ -403,10 +430,11 @@ func (e *Evaluator) evalParallelFor(stmt *ast.ForStmt, items []interface{}) erro
 			// Create a temporary evaluator for this goroutine
 			// to avoid concurrent access issues
 			tempEval := &Evaluator{
-				scope:           loopScope,
-				prevResponse:    e.prevResponse,
-				basePath:        e.basePath,
+				scope:          loopScope,
+				prevResponse:   e.prevResponse,
+				basePath:       e.basePath,
 				requestCallback: e.requestCallback,
+				defaultTimeout: e.defaultTimeout, // Copy default timeout
 			}
 			
 			// Evaluate body statements
@@ -424,15 +452,8 @@ func (e *Evaluator) evalParallelFor(stmt *ast.ForStmt, items []interface{}) erro
 					if req != nil {
 						iterRequests = append(iterRequests, req)
 						
-						// Execute request if callback is set
-						if e.requestCallback != nil {
-							_, err := e.requestCallback(req)
-							if err != nil {
-								mu.Lock()
-								errors = append(errors, err)
-								mu.Unlock()
-							}
-						}
+						// Don't execute callback here - it's handled by EvalParallelForWithOutput
+						// This function is only for collecting requests (EvalToRequests)
 					}
 				}
 			}
@@ -589,6 +610,9 @@ func (e *Evaluator) EvalParallelForWithOutput(stmt *ast.ForStmt) error {
 		return nil
 	}
 
+	// Record start time for wall time calculation
+	loopStartTime := time.Now()
+
 	// Determine concurrency limit
 	concurrency := stmt.Concurrency
 	if concurrency <= 0 {
@@ -631,10 +655,11 @@ func (e *Evaluator) EvalParallelForWithOutput(stmt *ast.ForStmt) error {
 			
 			// Create a temporary evaluator for this goroutine
 			tempEval := &Evaluator{
-				scope:           loopScope,
-				prevResponse:    e.prevResponse,
-				basePath:        e.basePath,
+				scope:          loopScope,
+				prevResponse:   e.prevResponse,
+				basePath:       e.basePath,
 				requestCallback: e.requestCallback,
+				defaultTimeout: e.defaultTimeout, // Copy default timeout
 			}
 			
 			// Evaluate body statements and execute requests with real-time output
@@ -673,6 +698,9 @@ func (e *Evaluator) EvalParallelForWithOutput(stmt *ast.ForStmt) error {
 	
 	wg.Wait()
 	
+	// Calculate wall time (actual elapsed time for the parallel loop)
+	wallTime := time.Since(loopStartTime)
+	
 	// Calculate statistics
 	if len(times) > 0 {
 		stats.MinTime = times[0]
@@ -696,10 +724,11 @@ func (e *Evaluator) EvalParallelForWithOutput(stmt *ast.ForStmt) error {
 		"total":      stats.Total,
 		"success":    stats.Success,
 		"failed":     stats.Failed,
-		"total_time": stats.TotalTime.String(),
-		"min_time":   stats.MinTime.String(),
-		"max_time":   stats.MaxTime.String(),
-		"avg_time":   stats.AvgTime.String(),
+		"total_time":  stats.TotalTime.String(),
+		"min_time":    stats.MinTime.String(),
+		"max_time":    stats.MaxTime.String(),
+		"avg_time":    stats.AvgTime.String(),
+		"wall_time":   wallTime.String(),
 	}
 	e.scope.Set("_parallel_stats", statsMap) // keep last stats for compatibility
 
@@ -973,6 +1002,72 @@ func isIdentChar(ch byte) bool {
 		(ch >= 'A' && ch <= 'Z') ||
 		(ch >= '0' && ch <= '9') ||
 		ch == '_'
+}
+
+// parseTimeout parses a timeout value and returns a time.Duration
+// Supports: number (seconds), "30s", "5000ms", "2m"
+func parseTimeout(val interface{}) (time.Duration, error) {
+	switch v := val.(type) {
+	case int64:
+		// Number without unit: treat as seconds
+		return time.Duration(v) * time.Second, nil
+	case float64:
+		// Float number: treat as seconds
+		return time.Duration(v * float64(time.Second)), nil
+	case string:
+		// String with unit: "30s", "5000ms", "2m"
+		return parseTimeoutString(v)
+	default:
+		return 0, fmt.Errorf("unsupported timeout type: %T", val)
+	}
+}
+
+// parseTimeoutString parses timeout strings like "30s", "5000ms", "2m"
+func parseTimeoutString(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty timeout string")
+	}
+
+	// Try to parse as number first (default to seconds)
+	if num, err := strconv.ParseFloat(s, 64); err == nil {
+		return time.Duration(num * float64(time.Second)), nil
+	}
+
+	// Parse with unit suffix
+	var numStr string
+	var unit string
+	
+	// Find where the number ends
+	for i, r := range s {
+		if (r >= '0' && r <= '9') || r == '.' {
+			numStr += string(r)
+		} else {
+			unit = s[i:]
+			break
+		}
+	}
+	
+	if numStr == "" {
+		return 0, fmt.Errorf("no number found in timeout string: %s", s)
+	}
+	
+	num, err := strconv.ParseFloat(numStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid number in timeout string: %s", numStr)
+	}
+	
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	switch unit {
+	case "s", "sec", "second", "seconds":
+		return time.Duration(num * float64(time.Second)), nil
+	case "ms", "msec", "millisecond", "milliseconds":
+		return time.Duration(num * float64(time.Millisecond)), nil
+	case "m", "min", "minute", "minutes":
+		return time.Duration(num * float64(time.Minute)), nil
+	default:
+		return 0, fmt.Errorf("unknown timeout unit: %s (supported: s, ms, m)", unit)
+	}
 }
 
 // parseImportedFile is a placeholder - will be connected to the parser

@@ -143,11 +143,17 @@ func (p *ParserV2) parseVarDefStmt() *ast.VarDefStmt {
 		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
 	}
 
-	// Expect identifier after @
-	if !p.expectPeek(lexer.IDENT) {
+	// Expect identifier after @ (can be IDENT or a keyword used as identifier)
+	p.nextToken()
+	if p.curTokenIs(lexer.IDENT) {
+		stmt.Name = p.curToken.Literal
+	} else if p.curTokenIs(lexer.TIMEOUT) || p.curTokenIs(lexer.HEADERS) || p.curTokenIs(lexer.BODY) {
+		// Allow keywords to be used as variable names
+		stmt.Name = p.curToken.Literal
+	} else {
+		p.addError("expected identifier after @")
 		return nil
 	}
-	stmt.Name = p.curToken.Literal
 
 	p.nextToken()
 
@@ -343,13 +349,52 @@ func (p *ParserV2) parseRequestStmt() *ast.RequestStmt {
 					p.nextToken()
 				}
 			}
+		} else if p.curTokenIs(lexer.TIMEOUT) {
+			p.nextToken()
+			// Parse timeout expression (e.g., 30, "30s", "5000ms", 1m)
+			// Special handling: if we have a number followed by an identifier, combine them
+			stmt.Timeout = p.parseTimeoutExpression()
+			// Skip to newline
+			for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) && !p.curTokenIs(lexer.DEDENT) {
+				p.nextToken()
+			}
+			if p.curTokenIs(lexer.NEWLINE) {
+				p.nextToken()
+			}
 		} else {
-			// Not headers or body, done parsing this request
+			// Not headers, body, or timeout, done parsing this request
 			break
 		}
 	}
 
 	return stmt
+}
+
+// parseTimeoutExpression parses a timeout value, handling number+unit combinations like "1m", "30s"
+func (p *ParserV2) parseTimeoutExpression() ast.Expression {
+	pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+	
+	// If it's a number, check if next token is an identifier (unit)
+	if p.curTokenIs(lexer.INT) || p.curTokenIs(lexer.FLOAT) {
+		numStr := p.curToken.Literal
+		// Peek at next token to see if it's a unit identifier
+		if p.peekTokenIs(lexer.IDENT) {
+			// Combine number + unit as a string (e.g., "1m", "30s")
+			p.nextToken() // move to the unit identifier
+			unit := p.curToken.Literal
+			combined := numStr + unit
+			return &ast.StringLiteral{
+				Position: pos,
+				Value:    combined,
+				Quoted:   false,
+			}
+		}
+		// Just a number, parse normally
+		return p.parseExpression()
+	}
+	
+	// Not a number, parse as normal expression
+	return p.parseExpression()
 }
 
 func (p *ParserV2) parseBlockExpr() *ast.BlockExpr {

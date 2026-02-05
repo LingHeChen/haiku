@@ -39,6 +39,7 @@ const (
 	OPTIONS
 	HEADERS
 	BODY
+	TIMEOUT
 	TRUE
 	FALSE
 	NULL
@@ -79,6 +80,7 @@ var tokenNames = map[TokenType]string{
 	OPTIONS:     "OPTIONS",
 	HEADERS:     "HEADERS",
 	BODY:        "BODY",
+	TIMEOUT:     "TIMEOUT",
 	TRUE:        "TRUE",
 	FALSE:       "FALSE",
 	NULL:        "NULL",
@@ -499,6 +501,7 @@ var keywords = map[string]TokenType{
 	"options": OPTIONS,
 	"headers": HEADERS,
 	"body":    BODY,
+	"timeout": TIMEOUT,
 	"true":    TRUE,
 	"false":   FALSE,
 	"null":    NULL,
