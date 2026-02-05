@@ -221,7 +221,8 @@ func (p *ParserV2) parseForStmt() *ast.ForStmt {
 		p.nextToken() // INDENT
 
 		// Parse statements inside the loop
-		for !p.curTokenIs(lexer.DEDENT) && !p.curTokenIs(lexer.EOF) {
+		// Stop at DEDENT, EOF, or TRIPLE_DASH (request separator)
+		for !p.curTokenIs(lexer.DEDENT) && !p.curTokenIs(lexer.EOF) && !p.curTokenIs(lexer.TRIPLE_DASH) {
 			innerStmt := p.parseStatement()
 			if innerStmt != nil {
 				stmt.Body = append(stmt.Body, innerStmt)

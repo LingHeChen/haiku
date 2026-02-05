@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LingHeChen/haiku/eval"
 	"github.com/LingHeChen/haiku/parser"
 	"github.com/LingHeChen/haiku/request"
 )
@@ -175,34 +176,27 @@ func dirPath(filePath string) string {
 }
 
 func showParsed(input string, basePath string) {
-	p, err := parser.New()
+	// 使用 v2 AST 架构
+	eval.SetImportParser(parser.ParseFile)
+	
+	program, err := parser.ParseFile(input)
 	if err != nil {
-		fatal("初始化解析器失败: %v", err)
+		fatal("解析错误: %v", err)
 	}
 
-	// 先从整个文件提取结构化变量（支持数组、对象等复杂类型）
-	vars := parser.ExtractStructuredVariables(input, basePath)
+	evaluator := eval.NewEvaluator(eval.WithBasePath(basePath))
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		fatal("执行错误: %v", err)
+	}
 
-	// 分割多个请求
-	requests := parser.SplitRequests(input)
-	
-	var prevResponse map[string]interface{}
-	
-	for i, reqInput := range requests {
+	for i, req := range requests {
 		if len(requests) > 1 {
 			fmt.Printf("--- Request %d ---\n", i+1)
 		}
 		
-		mapData, err := p.ParseToMapWithStructuredVars(reqInput, vars, prevResponse)
-		if err != nil {
-			fatal("解析错误: %v", err)
-		}
-
-		jsonBytes, _ := json.MarshalIndent(mapData, "", "  ")
+		jsonBytes, _ := json.MarshalIndent(req, "", "  ")
 		fmt.Println(string(jsonBytes))
-		
-		// 模拟响应（parse-only 模式没有真实响应）
-		prevResponse = mapData
 		
 		if len(requests) > 1 && i < len(requests)-1 {
 			fmt.Println()
@@ -211,35 +205,30 @@ func showParsed(input string, basePath string) {
 }
 
 func execute(input string, basePath string) {
-	// 解析器
-	p, err := parser.New()
+	// 使用 v2 AST 架构
+	eval.SetImportParser(parser.ParseFile)
+	
+	program, err := parser.ParseFile(input)
 	if err != nil {
-		fatal("初始化解析器失败: %v", err)
+		fatal("解析错误: %v", err)
 	}
 
-	// 先从整个文件提取结构化变量（支持数组、对象等复杂类型）
-	vars := parser.ExtractStructuredVariables(input, basePath)
+	evaluator := eval.NewEvaluator(eval.WithBasePath(basePath))
+	requests, err := evaluator.EvalToRequests(program)
+	if err != nil {
+		fatal("执行错误: %v", err)
+	}
 
-	// 分割多个请求（用 --- 分隔）
-	requests := parser.SplitRequests(input)
-	
-	var prevResponse map[string]interface{}
 	var lastResp *request.Response
 	totalStart := time.Now()
 
-	for i, reqInput := range requests {
+	for i, mapData := range requests {
 		// 如果有多个请求，显示序号（非静默模式）
 		if len(requests) > 1 && !quietMode && !bodyOnly {
 			fmt.Printf("\033[1m\033[36m[Request %d/%d]\033[0m\n", i+1, len(requests))
 		}
 
 		start := time.Now()
-		
-		// 解析，传入结构化变量和上一个响应
-		mapData, err := p.ParseToMapWithStructuredVars(reqInput, vars, prevResponse)
-		if err != nil {
-			fatal("解析错误: %v", err)
-		}
 
 		// 发送请求
 		resp, err := request.Do(mapData)
@@ -250,8 +239,6 @@ func execute(input string, basePath string) {
 		// 输出结果
 		printResponse(resp, time.Since(start))
 
-		// 保存响应用于下一个请求
-		prevResponse, _ = resp.JSON()
 		lastResp = resp
 		
 		// 如果有多个请求，添加分隔
