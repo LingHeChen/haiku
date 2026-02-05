@@ -9,7 +9,7 @@ A minimalist HTTP client that lets you write less and do more.
 - **Request chaining** - `$_.token` references previous response
 - **Unified variables** - `$var` for local, `$env.HOME` for environment
 - **Shorthand values** - `_` for null, `[]` for empty array, `{}` for empty object
-- **String processors** - `json`...`` and `base64`...`` for inline data
+- **String processors** - `json`... `and `base64`...` for inline data
 
 ## Why Haiku?
 
@@ -39,13 +39,15 @@ body
 
 ### Comparison
 
-| Feature | Haiku | curl | HTTPie |
-|---------|-------|------|--------|
-| Nested JSON body | `address`<br>`  city Beijing` | `-d '{"address":{"city":"Beijing"}}'` | `address:='{"city":"Beijing"}'` |
-| Type inference | `age 25` → number | manual | `age:=25` |
-| Request chaining | `$_.token` | shell scripts | not supported |
-| Variables | `$var`, `$env.HOME` | shell only | not supported |
-| Inline JSON | `json`{"a":1}`` | manual escaping | `data:='{"a":1}'` |
+
+| Feature          | Haiku                    | curl                                  | HTTPie                          |
+| ---------------- | ------------------------ | ------------------------------------- | ------------------------------- |
+| Nested JSON body | `address` `city Beijing` | `-d '{"address":{"city":"Beijing"}}'` | `address:='{"city":"Beijing"}'` |
+| Type inference   | `age 25` → number        | manual                                | `age:=25`                       |
+| Request chaining | `$_.token`               | shell scripts                         | not supported                   |
+| Variables        | `$var`, `$env.HOME`      | shell only                            | not supported                   |
+| Inline JSON      | `json`{"a":1}``          | manual escaping                       | `data:='{"a":1}'`               |
+
 
 ## Installation
 
@@ -170,37 +172,43 @@ delete "https://api.example.com/users/$_.data.0.id"
 
 **Response Reference Syntax:**
 
-| Syntax | Description |
-|--------|-------------|
-| `$_` | Entire previous response (as JSON) |
-| `$_.field` | Top-level field |
-| `$_.data.user.id` | Nested field |
-| `$_.items.0.name` | Array element (0-indexed) |
+
+| Syntax            | Description                        |
+| ----------------- | ---------------------------------- |
+| `$_`              | Entire previous response (as JSON) |
+| `$_.field`        | Top-level field                    |
+| `$_.data.user.id` | Nested field                       |
+| `$_.items.0.name` | Array element (0-indexed)          |
+
 
 ## Type Inference
 
 Values are automatically inferred:
 
-| Input | Type | Output |
-|-------|------|--------|
-| `name John` | string | `"John"` |
-| `age 25` | int | `25` |
-| `score 98.5` | float | `98.5` |
-| `active true` | bool | `true` |
-| `note _` | null | `null` |
-| `note null` | null | `null` |
-| `tags []` | empty array | `[]` |
-| `meta {}` | empty object | `{}` |
-| `name "John Smith"` | string | `"John Smith"` |
+
+| Input               | Type         | Output         |
+| ------------------- | ------------ | -------------- |
+| `name John`         | string       | `"John"`       |
+| `age 25`            | int          | `25`           |
+| `score 98.5`        | float        | `98.5`         |
+| `active true`       | bool         | `true`         |
+| `note _`            | null         | `null`         |
+| `note null`         | null         | `null`         |
+| `tags []`           | empty array  | `[]`           |
+| `meta {}`           | empty object | `{}`           |
+| `name "John Smith"` | string       | `"John Smith"` |
+
 
 ## Quoting Rules
 
 **Must be quoted:**
+
 - URLs: `get "https://example.com/api"`
 - Strings with spaces: `name "John Smith"`
 - Strings with special characters: `path "/api/v1"`
 
 **Can be unquoted:**
+
 - Simple strings: `name John`
 - Numbers: `age 25`
 - Booleans: `active true`
@@ -226,10 +234,12 @@ body
   message base64`SGVsbG8gV29ybGQh`
 ```
 
+
 | Processor | Description | Example |
 |-----------|-------------|---------|
-| `json`...`` | Embed raw JSON | `data json`{"a":1}`` |
-| `base64`...`` | Decode Base64 string | `msg base64`SGVsbG8=`` |
+| json\`...\` | Embed raw JSON | data json\`{"a":1}\` |
+| base64\`...\` | Decode Base64 string | msg base64\`SGVsbG8=\` |
+
 
 ## HTTP Methods
 
@@ -239,44 +249,44 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 ### Syntax Simplification
 
-- [x] Shorter variable syntax: `$var` instead of `{{var}}`
-- [x] Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
-- [x] String processors: `json`...`` and `base64`...`` for inline data embedding
-- [ ] URL without quotes: `get https://api.com` instead of `get "https://api.com"`
-- [ ] Auto-detect method: no body = GET, has body = POST
-- [ ] Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
-- [ ] Remove `headers`/`body` keywords - use `>` prefix for headers
+- Shorter variable syntax: `$var` instead of `{{var}}`
+- Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
+- String processors: `json`... `and `base64`...` for inline data embedding
+- URL without quotes: `get https://api.com` instead of `get "https://api.com"`
+- Auto-detect method: no body = GET, has body = POST
+- Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
+- Remove `headers`/`body` keywords - use `>` prefix for headers
 
 ### Request Features
 
-- [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
-- [ ] Retry with backoff
-- [ ] Timeout configuration
-- [ ] Follow redirects option
-- [ ] Proxy support
-- [ ] Cookie jar
+- Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
+- Retry with backoff
+- Timeout configuration
+- Follow redirects option
+- Proxy support
+- Cookie jar
 
 ### Response Handling
 
-- [ ] Response assertions: `expect status 200`, `expect body.id exists`
-- [ ] Save response to variable: `@user_id = response.id`
-- [ ] Output formatting: `--output json|yaml|table`
-- [ ] Save response to file
+- Response assertions: `expect status 200`, `expect body.id exists`
+- Save response to variable: `@user_id = response.id`
+- Output formatting: `--output json|yaml|table`
+- Save response to file
 
 ### Testing & Automation
 
-- [ ] Test mode: run multiple requests as test suite
-- [ ] Mock server: serve responses defined in .haiku files
-- [ ] Request diff: compare responses between environments
-- [ ] Generate .haiku from curl command
-- [ ] Generate .haiku from OpenAPI/Swagger spec
+- Test mode: run multiple requests as test suite
+- Mock server: serve responses defined in .haiku files
+- Request diff: compare responses between environments
+- Generate .haiku from curl command
+- Generate .haiku from OpenAPI/Swagger spec
 
 ### Developer Experience
 
-- [ ] VS Code extension with syntax highlighting
-- [ ] Watch mode: re-run on file change
-- [ ] Interactive mode (REPL)
-- [ ] Verbose/debug output
+- VS Code extension with syntax highlighting
+- Watch mode: re-run on file change
+- Interactive mode (REPL)
+- Verbose/debug output
 
 ## License
 
