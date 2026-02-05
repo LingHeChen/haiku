@@ -16,3 +16,12 @@ post "https://httpbin.org/post"
 body
   message base64`SGVsbG8gV29ybGQh`
   encoded "raw base64 string"
+
+---
+
+post "https://httpbin.org/post"
+body json`{
+  "name": "John",
+  "age": 25,
+  "tags": ["api", "test"]
+}`

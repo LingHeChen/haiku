@@ -9,6 +9,7 @@ A minimalist HTTP client that lets you write less and do more.
 - **Request chaining** - `$_.token` references previous response
 - **Unified variables** - `$var` for local, `$env.HOME` for environment
 - **Shorthand values** - `_` for null, `[]` for empty array, `{}` for empty object
+- **String processors** - `json`...`` and `base64`...`` for inline data
 
 ## Why Haiku?
 
@@ -44,6 +45,7 @@ body
 | Type inference | `age 25` → number | manual | `age:=25` |
 | Request chaining | `$_.token` | shell scripts | not supported |
 | Variables | `$var`, `$env.HOME` | shell only | not supported |
+| Inline JSON | `json`{"a":1}`` | manual escaping | `data:='{"a":1}'` |
 
 ## Installation
 
@@ -203,6 +205,32 @@ Values are automatically inferred:
 - Numbers: `age 25`
 - Booleans: `active true`
 
+### String Processors
+
+Embed pre-processed data directly using processor syntax:
+
+```haiku
+post "https://api.example.com/data"
+body
+  # Inline JSON (supports multi-line)
+  config json`{"key": "value", "nested": {"a": 1}}`
+  
+  # Multi-line JSON
+  payload json`{
+    "name": "John",
+    "age": 25,
+    "tags": ["api", "test"]
+  }`
+  
+  # Base64 decode
+  message base64`SGVsbG8gV29ybGQh`
+```
+
+| Processor | Description | Example |
+|-----------|-------------|---------|
+| `json`...`` | Embed raw JSON | `data json`{"a":1}`` |
+| `base64`...`` | Decode Base64 string | `msg base64`SGVsbG8=`` |
+
 ## HTTP Methods
 
 Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
@@ -213,6 +241,7 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 - [x] Shorter variable syntax: `$var` instead of `{{var}}`
 - [x] Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
+- [x] String processors: `json`...`` and `base64`...`` for inline data embedding
 - [ ] URL without quotes: `get https://api.com` instead of `get "https://api.com"`
 - [ ] Auto-detect method: no body = GET, has body = POST
 - [ ] Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`

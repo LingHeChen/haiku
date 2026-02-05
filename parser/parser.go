@@ -5,6 +5,7 @@ package parser
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -173,8 +174,22 @@ func (v *Value) MarshalJSON() ([]byte, error) {
 // 预处理器
 // ---------------------------------------------------------
 
+// 处理器字符串正则（匹配 json`...` 等，包括多行）
+var processedStringRegex = regexp.MustCompile("(?s)[a-zA-Z_][a-zA-Z0-9_]*`[^`]*`")
+
 // preprocess 将基于缩进的格式转换为基于大括号的格式
 func preprocess(input string) string {
+	// 1. 保护处理器字符串（json`...` 等），避免被预处理破坏
+	placeholders := make(map[string]string)
+	placeholderIdx := 0
+	input = processedStringRegex.ReplaceAllStringFunc(input, func(match string) string {
+		placeholder := fmt.Sprintf("__PROC_%d__", placeholderIdx)
+		placeholders[placeholder] = match
+		placeholderIdx++
+		return placeholder
+	})
+
+	// 2. 正常预处理
 	var sb strings.Builder
 	lines := strings.Split(input, "\n")
 	stack := []int{0}
@@ -225,7 +240,14 @@ func preprocess(input string) string {
 		sb.WriteString(" }")
 	}
 
-	return sb.String()
+	result := sb.String()
+
+	// 3. 恢复处理器字符串
+	for placeholder, original := range placeholders {
+		result = strings.ReplaceAll(result, placeholder, original)
+	}
+
+	return result
 }
 
 // ---------------------------------------------------------
@@ -367,7 +389,7 @@ func substituteVariables(input string, vars map[string]string) string {
 // ---------------------------------------------------------
 
 var haikuLexer = lexer.MustSimple([]lexer.SimpleRule{
-	{Name: "ProcessedString", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*`[^`]*`"}, // json`...`, yaml`...`
+	{Name: "ProcessedString", Pattern: "[a-zA-Z_][a-zA-Z0-9_]*`[\\s\\S]*?`"}, // json`...`, yaml`...` (支持多行)
 	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"`},
 	{Name: "Float", Pattern: `\d+\.\d+`},
 	{Name: "Int", Pattern: `\d+`},
