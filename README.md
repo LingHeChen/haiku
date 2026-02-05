@@ -249,44 +249,44 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 ### Syntax Simplification
 
-- Shorter variable syntax: `$var` instead of `{{var}}`
-- Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
-- String processors: `json`... `and `base64`...` for inline data embedding
-- URL without quotes: `get https://api.com` instead of `get "https://api.com"`
-- Auto-detect method: no body = GET, has body = POST
-- Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
-- Remove `headers`/`body` keywords - use `>` prefix for headers
+- [x] Shorter variable syntax: `$var` instead of `{{var}}`
+- [x] Environment variables as object: `$env.HOME` instead of `{{$HOME}}`
+- [x] String processors: json\`...\` and base64\`...\` for inline data embedding
+- [ ] URL without quotes: `get https://api.com` instead of `get "https://api.com"`
+- [ ] Auto-detect method: no body = GET, has body = POST
+- [ ] Common header shortcuts: `json` → `Content-Type: application/json`, `auth token` → `Authorization: Bearer token`
+- [ ] Remove `headers`/`body` keywords - use `>` prefix for headers
 
 ### Request Features
 
-- Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
-- Retry with backoff
-- Timeout configuration
-- Follow redirects option
-- Proxy support
-- Cookie jar
+- [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
+- [ ] Retry with backoff
+- [ ] Timeout configuration
+- [ ] Follow redirects option
+- [ ] Proxy support
+- [ ] Cookie jar
 
 ### Response Handling
 
-- Response assertions: `expect status 200`, `expect body.id exists`
-- Save response to variable: `@user_id = response.id`
-- Output formatting: `--output json|yaml|table`
-- Save response to file
+- [ ] Response assertions: `expect status 200`, `expect body.id exists`
+- [ ] Save response to variable: `@user_id = response.id`
+- [ ] Output formatting: `--output json|yaml|table`
+- [ ] Save response to file
 
 ### Testing & Automation
 
-- Test mode: run multiple requests as test suite
-- Mock server: serve responses defined in .haiku files
-- Request diff: compare responses between environments
-- Generate .haiku from curl command
-- Generate .haiku from OpenAPI/Swagger spec
+- [ ] Test mode: run multiple requests as test suite
+- [ ] Mock server: serve responses defined in .haiku files
+- [ ] Request diff: compare responses between environments
+- [ ] Generate .haiku from curl command
+- [ ] Generate .haiku from OpenAPI/Swagger spec
 
 ### Developer Experience
 
-- VS Code extension with syntax highlighting
-- Watch mode: re-run on file change
-- Interactive mode (REPL)
-- Verbose/debug output
+- [ ] VS Code extension with syntax highlighting
+- [ ] Watch mode: re-run on file change
+- [ ] Interactive mode (REPL)
+- [ ] Verbose/debug output
 
 ## License
 
