@@ -1,0 +1,72 @@
+# 条件语句示例 - 使用 ? 和 : 语法
+
+# 基本用法：? 代替 if，: 代替 else
+? $env.ENV == "production"
+  @base_url "https://api.prod.com"
+  @timeout 60s
+:
+  @base_url "https://api.dev.com"
+  @timeout 30s
+
+# 使用配置的变量（如果没有设置 ENV，会使用 dev 的 base_url）
+echo "base_url = $base_url"
+get "$base_url/get"
+headers
+  Authorization "Bearer test-token"
+
+---
+
+# 多个条件分支：: condition 代替 else if
+? $env.ENV == "production"
+  @api_key $env.PROD_API_KEY
+: $env.ENV == "staging"
+  @api_key $env.STAGING_API_KEY
+:
+  @api_key $env.DEV_API_KEY
+
+---
+
+# 使用逻辑操作符
+? $env.DEBUG == "true" and $env.ENV != "production"
+  @log_level "debug"
+  @verbose true
+:
+  @log_level "info"
+  @verbose false
+
+---
+
+# 数值比较（这个条件会满足，因为 max_retries = 3 > 0）
+@max_retries 3
+
+? $max_retries > 5
+  @timeout 120s
+: $max_retries > 0
+  @timeout 60s
+:
+  @timeout 30s
+
+# 测试请求（会使用上面设置的 timeout）
+get "https://httpbin.org/get"
+
+---
+
+# 字符串比较示例 - 多个条件分支
+? $env.REGION == "us-east"
+  @endpoint "https://us-east.api.com"
+: $env.REGION == "eu-west"
+  @endpoint "https://eu-west.api.com"
+: $env.REGION == "asia"
+  @endpoint "https://asia.api.com"
+:
+  @endpoint "https://default.api.com"
+
+get "$endpoint/health"
+
+---
+
+# 传统 if-else 语法仍然支持（向后兼容）
+if $env.ENV == "production"
+  @base_url "https://api.prod.com"
+else
+  @base_url "https://api.dev.com"

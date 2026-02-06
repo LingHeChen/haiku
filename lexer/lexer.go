@@ -43,6 +43,12 @@ const (
 	TRUE
 	FALSE
 	NULL
+	IF
+	ELSE
+	AND
+	OR
+	NOT
+	ECHO
 
 	// Symbols
 	AT          // @
@@ -54,6 +60,16 @@ const (
 	EMPTY_OBJ   // {}
 	TRIPLE_DASH // ---
 	COMMENT     // # comment
+	QUESTION    // ? (for conditional)
+	COLON       // : (for else)
+	
+	// Comparison operators
+	EQ    // ==
+	NE    // !=
+	GT    // >
+	LT    // <
+	GTE   // >=
+	LTE   // <=
 )
 
 var tokenNames = map[TokenType]string{
@@ -84,6 +100,12 @@ var tokenNames = map[TokenType]string{
 	TRUE:        "TRUE",
 	FALSE:       "FALSE",
 	NULL:        "NULL",
+	IF:          "IF",
+	ELSE:        "ELSE",
+	AND:         "AND",
+	OR:          "OR",
+	NOT:         "NOT",
+	ECHO:        "ECHO",
 	AT:          "AT",
 	DOLLAR:      "DOLLAR",
 	DOT:         "DOT",
@@ -93,6 +115,14 @@ var tokenNames = map[TokenType]string{
 	EMPTY_OBJ:   "EMPTY_OBJ",
 	TRIPLE_DASH: "TRIPLE_DASH",
 	COMMENT:     "COMMENT",
+	QUESTION:    "QUESTION",
+	COLON:       "COLON",
+	EQ:          "EQ",
+	NE:          "NE",
+	GT:          "GT",
+	LT:          "LT",
+	GTE:         "GTE",
+	LTE:         "LTE",
 }
 
 func (t TokenType) String() string {
@@ -243,6 +273,64 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = COMMA
 		tok.Literal = ","
 		l.readChar()
+
+	case '?':
+		tok.Type = QUESTION
+		tok.Literal = "?"
+		l.readChar()
+
+	case ':':
+		tok.Type = COLON
+		tok.Literal = ":"
+		l.readChar()
+
+	case '=':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok.Type = EQ
+			tok.Literal = "=="
+			l.readChar()
+		} else {
+			tok.Type = ILLEGAL
+			tok.Literal = string(l.ch)
+			l.readChar()
+		}
+
+	case '!':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok.Type = NE
+			tok.Literal = "!="
+			l.readChar()
+		} else {
+			tok.Type = ILLEGAL
+			tok.Literal = string(l.ch)
+			l.readChar()
+		}
+
+	case '>':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok.Type = GTE
+			tok.Literal = ">="
+			l.readChar()
+		} else {
+			tok.Type = GT
+			tok.Literal = ">"
+			l.readChar()
+		}
+
+	case '<':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok.Type = LTE
+			tok.Literal = "<="
+			l.readChar()
+		} else {
+			tok.Type = LT
+			tok.Literal = "<"
+			l.readChar()
+		}
 
 	case '"':
 		tok.Type = STRING
@@ -492,21 +580,27 @@ var keywords = map[string]TokenType{
 	"for":      FOR,
 	"in":       IN,
 	"parallel": PARALLEL,
-	"get":     GET,
-	"post":    POST,
-	"put":     PUT,
-	"delete":  DELETE,
-	"patch":   PATCH,
-	"head":    HEAD,
-	"options": OPTIONS,
-	"headers": HEADERS,
-	"body":    BODY,
-	"timeout": TIMEOUT,
-	"true":    TRUE,
-	"false":   FALSE,
-	"null":    NULL,
-	"nil":     NULL,
-	"_":       UNDERSCORE,
+	"get":      GET,
+	"post":     POST,
+	"put":      PUT,
+	"delete":   DELETE,
+	"patch":    PATCH,
+	"head":     HEAD,
+	"options":  OPTIONS,
+	"headers":  HEADERS,
+	"body":     BODY,
+	"timeout":  TIMEOUT,
+	"true":     TRUE,
+	"false":    FALSE,
+	"null":     NULL,
+	"nil":      NULL,
+	"_":        UNDERSCORE,
+	"if":       IF,
+	"else":     ELSE,
+	"and":      AND,
+	"or":       OR,
+	"not":      NOT,
+	"echo":     ECHO,
 }
 
 func lookupKeyword(ident string) TokenType {

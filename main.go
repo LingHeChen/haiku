@@ -329,6 +329,14 @@ func execute(input string, basePath string) {
 					fatal("执行错误: %v", err)
 				}
 			}
+		case *ast.IfStmt:
+			if err := evaluator.EvalIf(s); err != nil {
+				fatal("执行错误: %v", err)
+			}
+		case *ast.EchoStmt:
+			if err := evaluator.EvalEcho(s); err != nil {
+				fatal("执行错误: %v", err)
+			}
 		case *ast.SeparatorStmt:
 			// 分隔符：跳过
 		}

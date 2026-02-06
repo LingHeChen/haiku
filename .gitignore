@@ -4,6 +4,7 @@ haiku
 # IDE
 .idea/
 .vscode/
+!.vscode/haiku.tmLanguage.json  # Keep syntax highlighting file
 *.swp
 *.swo
 
@@ -16,3 +17,6 @@ coverage.out
 
 # Design documents
 design/
+
+# VS Code syntax highlighting (keep in repo for users)
+# .vscode/

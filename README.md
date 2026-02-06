@@ -210,6 +210,32 @@ headers
   Authorization "$token"
 ```
 
+### Echo Statement (Debug Output)
+
+Use `echo` to print values to stderr for debugging:
+
+```haiku
+@base_url "https://api.example.com"
+echo "base_url = $base_url"
+
+? $env.ENV == "production"
+  @timeout 60s
+  echo "Using production timeout: $timeout"
+:
+  @timeout 30s
+  echo "Using dev timeout: $timeout"
+
+get "$base_url/users"
+```
+
+Output:
+```
+[echo] base_url = https://api.example.com
+[echo] Using dev timeout: 30s
+```
+
+The `echo` statement evaluates expressions and prints them to stderr, making it useful for debugging variable values and conditional branches without interfering with request/response output.
+
 ### Request Chaining
 
 Use `---` to separate multiple requests and `$_` to reference the previous response:

@@ -90,6 +90,33 @@ func (s *ForStmt) nodeType() string  { return "ForStmt" }
 func (s *ForStmt) Pos() Position     { return s.Position }
 func (s *ForStmt) statementNode()    {}
 
+// IfStmt: if condition ... [else ...] or ? condition ... [: condition ...] [: ...]
+type IfStmt struct {
+	Position Position
+	Branches []IfBranch // list of condition-statement pairs
+	Else     []Statement // final else branch (optional, when last branch has no condition)
+}
+
+// IfBranch represents a single condition-statement pair
+type IfBranch struct {
+	Condition Expression  // condition expression (nil for final else)
+	Body      []Statement // statements in this branch
+}
+
+func (s *IfStmt) nodeType() string  { return "IfStmt" }
+func (s *IfStmt) Pos() Position     { return s.Position }
+func (s *IfStmt) statementNode()    {}
+
+// EchoStmt: echo expression (debug output)
+type EchoStmt struct {
+	Position Position
+	Value    Expression
+}
+
+func (s *EchoStmt) nodeType() string  { return "EchoStmt" }
+func (s *EchoStmt) Pos() Position     { return s.Position }
+func (s *EchoStmt) statementNode()    {}
+
 // SeparatorStmt: --- (request separator)
 type SeparatorStmt struct {
 	Position Position
@@ -188,6 +215,29 @@ type VarRef struct {
 func (e *VarRef) nodeType() string  { return "VarRef" }
 func (e *VarRef) Pos() Position     { return e.Position }
 func (e *VarRef) exprNode()         {}
+
+// BinaryExpr: left op right (e.g., $env.ENV == "production", $x > 10)
+type BinaryExpr struct {
+	Position Position
+	Left     Expression
+	Operator string // "==", "!=", ">", "<", ">=", "<=", "and", "or"
+	Right    Expression
+}
+
+func (e *BinaryExpr) nodeType() string  { return "BinaryExpr" }
+func (e *BinaryExpr) Pos() Position     { return e.Position }
+func (e *BinaryExpr) exprNode()         {}
+
+// UnaryExpr: op expr (e.g., not $flag)
+type UnaryExpr struct {
+	Position Position
+	Operator string // "not"
+	Operand  Expression
+}
+
+func (e *UnaryExpr) nodeType() string  { return "UnaryExpr" }
+func (e *UnaryExpr) Pos() Position     { return e.Position }
+func (e *UnaryExpr) exprNode()         {}
 
 // FullPath returns the complete variable path as a string
 func (e *VarRef) FullPath() string {

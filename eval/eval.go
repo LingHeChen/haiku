@@ -132,6 +132,10 @@ func (e *Evaluator) evalStatement(stmt ast.Statement) (map[string]interface{}, e
 		return e.evalRequest(s)
 	case *ast.ForStmt:
 		return nil, e.evalForCollect(s)
+	case *ast.IfStmt:
+		return nil, e.evalIf(s)
+	case *ast.EchoStmt:
+		return nil, e.evalEcho(s)
 	case *ast.SeparatorStmt:
 		// Separator doesn't produce output
 		return nil, nil
@@ -158,6 +162,10 @@ func (e *Evaluator) evalStatementCollect(stmt ast.Statement) error {
 		return nil
 	case *ast.ForStmt:
 		return e.evalForCollect(s)
+	case *ast.IfStmt:
+		return e.evalIf(s)
+	case *ast.EchoStmt:
+		return e.evalEcho(s)
 	case *ast.SeparatorStmt:
 		return nil
 	}
@@ -276,6 +284,11 @@ func (e *Evaluator) evalFor(stmt *ast.ForStmt) error {
 // EvalForCollect evaluates a for loop and collects/executes requests (public method)
 func (e *Evaluator) EvalForCollect(stmt *ast.ForStmt) error {
 	return e.evalForCollect(stmt)
+}
+
+// EvalIf evaluates an if statement (public method)
+func (e *Evaluator) EvalIf(stmt *ast.IfStmt) error {
+	return e.evalIf(stmt)
 }
 
 func (e *Evaluator) evalForCollect(stmt *ast.ForStmt) error {
@@ -792,6 +805,12 @@ func (e *Evaluator) evalExpr(expr ast.Expression) interface{} {
 
 	case *ast.Literal:
 		return ex.Value
+
+	case *ast.BinaryExpr:
+		return e.evalBinaryExpr(ex)
+
+	case *ast.UnaryExpr:
+		return e.evalUnaryExpr(ex)
 	}
 
 	return nil
@@ -946,6 +965,206 @@ func (e *Evaluator) resolveVarPath(path string) interface{} {
 	}
 
 	return getNestedValue(val, parts[1:])
+}
+
+// EvalEcho evaluates an echo statement (public method)
+func (e *Evaluator) EvalEcho(stmt *ast.EchoStmt) error {
+	return e.evalEcho(stmt)
+}
+
+func (e *Evaluator) evalEcho(stmt *ast.EchoStmt) error {
+	if stmt.Value == nil {
+		fmt.Fprintln(os.Stderr, "[echo]")
+		return nil
+	}
+	val := e.evalExpr(stmt.Value)
+	fmt.Fprintf(os.Stderr, "[echo] %v\n", val)
+	return nil
+}
+
+func (e *Evaluator) evalIf(stmt *ast.IfStmt) error {
+	// Try each branch in order
+	for _, branch := range stmt.Branches {
+		condition := e.evalExpr(branch.Condition)
+		if e.isTruthy(condition) {
+			// Execute this branch
+			for _, s := range branch.Body {
+				if err := e.evalStatementCollect(s); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	
+	// No branch matched, execute else if present
+	for _, s := range stmt.Else {
+		if err := e.evalStatementCollect(s); err != nil {
+			return err
+		}
+	}
+	
+	return nil
+}
+
+func (e *Evaluator) evalBinaryExpr(expr *ast.BinaryExpr) interface{} {
+	left := e.evalExpr(expr.Left)
+	right := e.evalExpr(expr.Right)
+
+	switch expr.Operator {
+	case "==":
+		return e.compareValues(left, right) == 0
+	case "!=":
+		return e.compareValues(left, right) != 0
+	case ">":
+		return e.compareValues(left, right) > 0
+	case "<":
+		return e.compareValues(left, right) < 0
+	case ">=":
+		return e.compareValues(left, right) >= 0
+	case "<=":
+		return e.compareValues(left, right) <= 0
+	case "and":
+		return e.isTruthy(left) && e.isTruthy(right)
+	case "or":
+		return e.isTruthy(left) || e.isTruthy(right)
+	default:
+		return false
+	}
+}
+
+func (e *Evaluator) evalUnaryExpr(expr *ast.UnaryExpr) interface{} {
+	operand := e.evalExpr(expr.Operand)
+
+	switch expr.Operator {
+	case "not":
+		return !e.isTruthy(operand)
+	default:
+		return operand
+	}
+}
+
+func (e *Evaluator) compareValues(left, right interface{}) int {
+	// Handle nil/null comparisons
+	if left == nil && right == nil {
+		return 0
+	}
+	if left == nil {
+		return -1
+	}
+	if right == nil {
+		return 1
+	}
+
+	// Type-based comparison
+	switch l := left.(type) {
+	case string:
+		r, ok := right.(string)
+		if !ok {
+			return -1
+		}
+		if l < r {
+			return -1
+		}
+		if l > r {
+			return 1
+		}
+		return 0
+
+	case int64:
+		switch r := right.(type) {
+		case int64:
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		case float64:
+			lf := float64(l)
+			if lf < r {
+				return -1
+			}
+			if lf > r {
+				return 1
+			}
+			return 0
+		default:
+			return -1
+		}
+
+	case float64:
+		switch r := right.(type) {
+		case float64:
+			if l < r {
+				return -1
+			}
+			if l > r {
+				return 1
+			}
+			return 0
+		case int64:
+			rf := float64(r)
+			if l < rf {
+				return -1
+			}
+			if l > rf {
+				return 1
+			}
+			return 0
+		default:
+			return -1
+		}
+
+	case bool:
+		r, ok := right.(bool)
+		if !ok {
+			return -1
+		}
+		if !l && r {
+			return -1
+		}
+		if l && !r {
+			return 1
+		}
+		return 0
+
+	default:
+		// For other types, convert to string and compare
+		ls := fmt.Sprintf("%v", left)
+		rs := fmt.Sprintf("%v", right)
+		if ls < rs {
+			return -1
+		}
+		if ls > rs {
+			return 1
+		}
+		return 0
+	}
+}
+
+func (e *Evaluator) isTruthy(val interface{}) bool {
+	if val == nil {
+		return false
+	}
+
+	switch v := val.(type) {
+	case bool:
+		return v
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0.0
+	case string:
+		return v != ""
+	case []interface{}:
+		return len(v) > 0
+	case map[string]interface{}:
+		return len(v) > 0
+	default:
+		return true
+	}
 }
 
 func (e *Evaluator) inferType(s string) interface{} {

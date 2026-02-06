@@ -1,0 +1,165 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Haiku",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#literals"
+    },
+    {
+      "include": "#separators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.haiku",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.url.haiku",
+          "match": "\"(https?://[^\"]+)\"",
+          "captures": {
+            "1": {
+              "name": "markup.underline.link.haiku"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.double.haiku",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.haiku",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.other.processor.haiku",
+          "begin": "\\b(json|base64|file)`",
+          "end": "`",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.function.processor.haiku"
+            }
+          },
+          "patterns": [
+            {
+              "name": "string.quoted.other.processor.content.haiku",
+              "match": "[^`]+"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.haiku",
+          "match": "\\b(import|for|in|parallel)\\b"
+        },
+        {
+          "name": "entity.name.function.http-method.haiku",
+          "match": "\\b(get|post|put|delete|patch|head|options)\\b"
+        },
+        {
+          "name": "keyword.other.request-structure.haiku",
+          "match": "\\b(headers|body|timeout)\\b"
+        },
+        {
+          "name": "constant.language.boolean.haiku",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.haiku",
+          "match": "\\b(null|nil|_)\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.readwrite.definition.haiku",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+          "name": "variable.other.readwrite.environment.haiku",
+          "match": "\\$env\\.[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        {
+          "name": "variable.other.readwrite.previous-response.haiku",
+          "match": "\\$_\\b"
+        },
+        {
+          "name": "variable.other.readwrite.reference.haiku",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_.]*"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.haiku",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.haiku",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        {
+          "name": "constant.language.empty-array.haiku",
+          "match": "\\[\\]"
+        },
+        {
+          "name": "constant.language.empty-object.haiku",
+          "match": "\\{\\}"
+        },
+        {
+          "name": "punctuation.separator.request.haiku",
+          "match": "^-{3}$"
+        }
+      ]
+    },
+    "separators": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.field-access.haiku",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.separator.comma.haiku",
+          "match": ","
+        }
+      ]
+    }
+  },
+  "scopeName": "source.haiku",
+  "fileTypes": [
+    "haiku"
+  ]
+}

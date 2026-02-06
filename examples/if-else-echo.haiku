@@ -1,0 +1,8 @@
+@value 2
+
+? $value < 0
+  echo "value is less than 0"
+: $value == 0
+  echo "value is equal to 0"
+:
+  echo "value is greater than 0"

@@ -105,6 +105,12 @@ func (p *ParserV2) parseStatement() ast.Statement {
 		return p.parseParallelForStmt()
 	case lexer.FOR:
 		return p.parseForStmt(false, 0)
+	case lexer.IF:
+		return p.parseIfStmt()
+	case lexer.ECHO:
+		return p.parseEchoStmt()
+	case lexer.QUESTION:
+		return p.parseQuestionIfStmt()
 	case lexer.TRIPLE_DASH:
 		return p.parseSeparatorStmt()
 	case lexer.GET, lexer.POST, lexer.PUT, lexer.DELETE, lexer.PATCH, lexer.HEAD, lexer.OPTIONS:
@@ -279,10 +285,258 @@ func (p *ParserV2) parseForStmt(parallel bool, concurrency int) *ast.ForStmt {
 	return stmt
 }
 
+func (p *ParserV2) parseEchoStmt() *ast.EchoStmt {
+	stmt := &ast.EchoStmt{
+		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
+	}
+
+	p.nextToken() // skip 'echo'
+
+	// Parse the expression to echo
+	if !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {
+		stmt.Value = p.parseExpression()
+	}
+
+	return stmt
+}
+
 func (p *ParserV2) parseSeparatorStmt() *ast.SeparatorStmt {
 	return &ast.SeparatorStmt{
 		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
 	}
+}
+
+func (p *ParserV2) parseIfStmt() *ast.IfStmt {
+	stmt := &ast.IfStmt{
+		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
+		Branches: []ast.IfBranch{},
+	}
+
+	p.nextToken() // skip 'if'
+
+	// Parse condition expression
+	condition := p.parseConditionExpression()
+
+	// Skip to newline
+	for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {
+		p.nextToken()
+	}
+
+	// Parse 'then' branch body
+	body := p.parseIndentedBody()
+
+	// Add first branch
+	stmt.Branches = append(stmt.Branches, ast.IfBranch{
+		Condition: condition,
+		Body:      body,
+	})
+
+	// Check for else branch: DEDENT followed by ELSE
+	if p.curTokenIs(lexer.DEDENT) && p.peekTokenIs(lexer.ELSE) {
+		p.nextToken() // skip DEDENT -> curToken = ELSE
+		p.nextToken() // skip 'else'
+
+		// Skip to newline
+		for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
+
+		// Parse 'else' branch body
+		stmt.Else = p.parseIndentedBody()
+		// curToken is at DEDENT
+	}
+
+	// curToken is at DEDENT (last token of the if statement)
+	return stmt
+}
+
+func (p *ParserV2) parseQuestionIfStmt() *ast.IfStmt {
+	stmt := &ast.IfStmt{
+		Position: ast.Position{Line: p.curToken.Line, Column: p.curToken.Column},
+		Branches: []ast.IfBranch{},
+	}
+
+	p.nextToken() // skip '?'
+
+	// Parse first condition
+	condition := p.parseConditionExpression()
+
+	// Skip to newline
+	for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {
+		p.nextToken()
+	}
+
+	// Parse first branch body (indented block)
+	// After return, curToken is at DEDENT
+	body := p.parseIndentedBody()
+	stmt.Branches = append(stmt.Branches, ast.IfBranch{
+		Condition: condition,
+		Body:      body,
+	})
+
+	// Check for : branches. After parseIndentedBody, curToken is at DEDENT.
+	// Peek to see if a COLON follows.
+	for p.curTokenIs(lexer.DEDENT) && p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // skip DEDENT -> curToken = COLON
+		p.nextToken() // skip COLON -> curToken = next token
+
+		if p.curTokenIs(lexer.NEWLINE) {
+			// ':' followed by newline -> final else branch (no condition)
+			stmt.Else = p.parseIndentedBody()
+			// curToken is at DEDENT, which is the "last token" of the if statement
+			break
+		}
+
+		// ':' followed by condition -> else-if branch
+		branchCondition := p.parseConditionExpression()
+
+		// Skip to newline
+		for !p.curTokenIs(lexer.NEWLINE) && !p.curTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
+
+		branchBody := p.parseIndentedBody()
+		// curToken is at DEDENT; the for-loop condition will peek for another COLON
+		stmt.Branches = append(stmt.Branches, ast.IfBranch{
+			Condition: branchCondition,
+			Body:      branchBody,
+		})
+	}
+
+	// curToken is at DEDENT (last token of the if statement)
+	// The caller (main Parse loop) will call nextToken() to advance past it
+	return stmt
+}
+
+// parseIndentedBody parses an indented block of statements.
+// Expects curToken to be at NEWLINE with peekToken possibly being INDENT.
+// After return, curToken is at DEDENT (the block terminator), NOT past it.
+// The caller decides whether to advance past DEDENT.
+func (p *ParserV2) parseIndentedBody() []ast.Statement {
+	var stmts []ast.Statement
+
+	if !p.peekTokenIs(lexer.INDENT) {
+		return stmts
+	}
+
+	p.nextToken() // consume NEWLINE, curToken = INDENT
+	p.nextToken() // consume INDENT, curToken = first token in block
+
+	for !p.curTokenIs(lexer.DEDENT) && !p.curTokenIs(lexer.EOF) && !p.curTokenIs(lexer.TRIPLE_DASH) {
+		innerStmt := p.parseStatement()
+		if innerStmt != nil {
+			stmts = append(stmts, innerStmt)
+		}
+		// Only advance if parseStatement didn't already reach a block terminator.
+		if !p.curTokenIs(lexer.DEDENT) && !p.curTokenIs(lexer.EOF) && !p.curTokenIs(lexer.TRIPLE_DASH) {
+			p.nextToken()
+		}
+	}
+
+	// Leave curToken at DEDENT - do NOT advance past it
+	return stmts
+}
+
+func (p *ParserV2) parseConditionExpression() ast.Expression {
+	return p.parseLogicalOr()
+}
+
+func (p *ParserV2) parseLogicalOr() ast.Expression {
+	left := p.parseLogicalAnd()
+
+	for p.curTokenIs(lexer.OR) {
+		op := "or"
+		pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+		p.nextToken()
+		right := p.parseLogicalAnd()
+		left = &ast.BinaryExpr{
+			Position: pos,
+			Left:     left,
+			Operator: op,
+			Right:    right,
+		}
+	}
+
+	return left
+}
+
+func (p *ParserV2) parseLogicalAnd() ast.Expression {
+	left := p.parseComparison()
+
+	for p.curTokenIs(lexer.AND) {
+		op := "and"
+		pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+		p.nextToken()
+		right := p.parseComparison()
+		left = &ast.BinaryExpr{
+			Position: pos,
+			Left:     left,
+			Operator: op,
+			Right:    right,
+		}
+	}
+
+	return left
+}
+
+func (p *ParserV2) parseComparison() ast.Expression {
+	left := p.parseUnary()
+
+	for p.curTokenIs(lexer.EQ) || p.curTokenIs(lexer.NE) || 
+		 p.curTokenIs(lexer.GT) || p.curTokenIs(lexer.LT) || 
+		 p.curTokenIs(lexer.GTE) || p.curTokenIs(lexer.LTE) {
+		var op string
+		switch p.curToken.Type {
+		case lexer.EQ:
+			op = "=="
+		case lexer.NE:
+			op = "!="
+		case lexer.GT:
+			op = ">"
+		case lexer.LT:
+			op = "<"
+		case lexer.GTE:
+			op = ">="
+		case lexer.LTE:
+			op = "<="
+		}
+		pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+		p.nextToken()
+		right := p.parseUnary()
+		left = &ast.BinaryExpr{
+			Position: pos,
+			Left:     left,
+			Operator: op,
+			Right:    right,
+		}
+	}
+
+	return left
+}
+
+func (p *ParserV2) parseUnary() ast.Expression {
+	if p.curTokenIs(lexer.NOT) {
+		pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+		op := "not"
+		p.nextToken()
+		operand := p.parseUnary()
+		return &ast.UnaryExpr{
+			Position: pos,
+			Operator: op,
+			Operand:  operand,
+		}
+	}
+
+	return p.parseConditionPrimary()
+}
+
+// parseConditionPrimary parses a primary expression in a condition context.
+// Unlike parseExpression which leaves curToken at the last token of the expression,
+// this advances curToken past the expression so the caller can check for operators.
+func (p *ParserV2) parseConditionPrimary() ast.Expression {
+	expr := p.parseExpression()
+	p.nextToken() // advance past the expression
+	return expr
 }
 
 func (p *ParserV2) parseRequestStmt() *ast.RequestStmt {
