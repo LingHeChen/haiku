@@ -9,7 +9,10 @@ A minimalist HTTP client that lets you write less and do more.
 - **Request chaining** - `$_.token` references previous response
 - **Unified variables** - `$var` for local, `$env.HOME` for environment
 - **Shorthand values** - `_` for null, `[]` for empty array, `{}` for empty object
-- **String processors** - `json`... `and `base64`...` for inline data
+- **String processors** - `json`...`, `base64`...`, and `file`...` for inline data
+- **Conditional statements** - `if/else` and `? :` syntax for conditional execution
+- **Loops** - `for` loops with parallel execution support
+- **Debug output** - `echo` statement for debugging variable values
 
 ## Why Haiku?
 
@@ -46,6 +49,8 @@ body
 | Type inference   | `age 25` → number        | manual                                | `age:=25`                       |
 | Request chaining | `$_.token`               | shell scripts                         | not supported                   |
 | Variables        | `$var`, `$env.HOME`      | shell only                            | not supported                   |
+| Conditional logic| `? $env.ENV == "prod"`   | shell scripts                         | not supported                   |
+| Loops            | `for $item in $items`     | shell scripts                         | not supported                   |
 | Inline JSON      | `json`{"a":1}``          | manual escaping                       | `data:='{"a":1}'`               |
 
 
@@ -195,9 +200,20 @@ headers
 
 ### Import
 
+Import statements allow you to share variables and configuration across files:
+
 ```haiku
 # config.haiku
-@base_url "https://api.example.com"
+? $env.ENV == "production"
+  @base_url "https://api.prod.com"
+  @timeout 60s
+: $env.ENV == "testing"
+  @base_url "https://api.test.com"
+  @timeout 30s
+:
+  @base_url "http://localhost"
+  @timeout 10s
+
 @token "Bearer xxx"
 ```
 
@@ -208,6 +224,79 @@ import "config.haiku"
 get "$base_url/users"
 headers
   Authorization "$token"
+```
+
+**Note:** Imported files can contain any statement types including conditional statements (`if`/`?`), variable definitions, and even other imports. All statements are evaluated in order, so variables set conditionally in imported files are available after import.
+
+### Conditional Statements
+
+Haiku supports conditional execution using two syntax styles:
+
+**Traditional if/else syntax:**
+
+```haiku
+if $env.ENV == "production"
+  @base_url "https://api.prod.com"
+  @timeout 60s
+else
+  @base_url "https://api.dev.com"
+  @timeout 30s
+```
+
+**Shorthand syntax with `?` and `:` (supports multiple branches):**
+
+```haiku
+? $env.ENV == "production"
+  @base_url "https://api.prod.com"
+  @timeout 60s
+: $env.ENV == "testing"
+  @base_url "https://api.test.com"
+  @timeout 30s
+:
+  @base_url "https://api.dev.com"
+  @timeout 10s
+```
+
+**Supported comparison operators:**
+- `==` - equals
+- `!=` - not equals
+- `>` - greater than
+- `<` - less than
+- `>=` - greater than or equal
+- `<=` - less than or equal
+
+**Logical operators:**
+- `and` - logical AND
+- `or` - logical OR
+- `not` - logical NOT
+
+**Examples:**
+
+```haiku
+# String comparison
+? $env.REGION == "us-east"
+  @endpoint "https://us-east.api.com"
+: $env.REGION == "eu-west"
+  @endpoint "https://eu-west.api.com"
+:
+  @endpoint "https://default.api.com"
+
+# Numeric comparison
+@max_retries 3
+? $max_retries > 5
+  @timeout 120s
+: $max_retries > 0
+  @timeout 60s
+:
+  @timeout 30s
+
+# Logical operators
+? $env.DEBUG == "true" and $env.ENV != "production"
+  @log_level "debug"
+  @verbose true
+:
+  @log_level "info"
+  @verbose false
 ```
 
 ### Echo Statement (Debug Output)
@@ -452,6 +541,9 @@ body
   
   # Base64 decode
   message base64`SGVsbG8gV29ybGQh`
+  
+  # Read and parse file (auto-detects JSON)
+  config file`config.json`
 ```
 
 
@@ -459,6 +551,7 @@ body
 |-----------|-------------|---------|
 | json\`...\` | Embed raw JSON | data json\`{"a":1}\` |
 | base64\`...\` | Decode Base64 string | msg base64\`SGVsbG8=\` |
+| file\`...\` | Read file and parse as JSON (or return as string) | config file\`config.json\` |
 
 
 ## HTTP Methods
@@ -482,7 +575,9 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 - [x] Request chaining with `$_`: reference previous response (`$_.token`, `$_.data.id`)
 - [x] For loop: iterate over arrays with `for $item in $items`
+- [x] Parallel for loop: concurrent request execution with `parallel for`
 - [x] Timeout configuration: global and per-request timeouts with multiple time units
+- [x] Conditional statements: `if/else` and `? :` syntax for conditional variable assignment
 - [ ] Retry with backoff
 - [ ] Follow redirects option
 - [ ] Proxy support
@@ -490,10 +585,10 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 ### Response Handling
 
+- [x] Save response to file: `-o <file>` option
 - [ ] Response assertions: `expect status 200`, `expect body.id exists`
 - [ ] Save response to variable: `@user_id = response.id`
 - [ ] Output formatting: `--output json|yaml|table`
-- [ ] Save response to file
 
 ### Testing & Automation
 
@@ -505,10 +600,10 @@ Supported methods: `get`, `post`, `put`, `delete`, `patch`, `head`, `options`
 
 ### Developer Experience
 
+- [x] Verbose/debug output: `--verbose` flag and `echo` statement
 - [ ] VS Code extension with syntax highlighting
 - [ ] Watch mode: re-run on file change
 - [ ] Interactive mode (REPL)
-- [ ] Verbose/debug output
 
 ## License
 
