@@ -194,10 +194,10 @@ func (e *Evaluator) evalImport(stmt *ast.ImportStmt) error {
 		return fmt.Errorf("import parse error: %w", err)
 	}
 
-	// Only extract variable definitions from imports
+	// Evaluate all statements in the imported file (including if statements, variable definitions, etc.)
 	for _, stmt := range importProgram.Statements {
-		if varDef, ok := stmt.(*ast.VarDefStmt); ok {
-			e.evalVarDef(varDef)
+		if err := e.evalStatementCollect(stmt); err != nil {
+			return fmt.Errorf("import evaluation error: %w", err)
 		}
 	}
 
