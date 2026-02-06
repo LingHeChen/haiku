@@ -1,0 +1,20 @@
+# 字符串拼接示例
+# 使用 + 将多段字符串或变量连接在一起
+
+@base "https://httpbin.org"
+@path "/get"
+@token "my-secret-token"
+
+# URL 拼接：$base + $path
+get $base + $path
+headers
+  # Header 拼接："Bearer " + $token
+  Authorization "Bearer " + $token
+  X-Custom "prefix_" + $token + "_suffix"
+
+---
+
+# 多段拼接
+get $base + "/response-headers" + "?x=1"
+headers
+  Authorization "Bearer " + $token

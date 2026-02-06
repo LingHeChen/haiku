@@ -727,6 +727,25 @@ func (p *ParserV2) parseEntry() *ast.Entry {
 }
 
 func (p *ParserV2) parseExpression() ast.Expression {
+	left := p.parsePrimary()
+	// String concatenation: left + right + ...
+	for p.peekTokenIs(lexer.PLUS) {
+		p.nextToken() // advance to PLUS
+		pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
+		p.nextToken() // advance past PLUS
+		right := p.parsePrimary()
+		left = &ast.BinaryExpr{
+			Position: pos,
+			Left:     left,
+			Operator: "+",
+			Right:    right,
+		}
+	}
+	return left
+}
+
+// parsePrimary parses a single expression (no binary operators).
+func (p *ParserV2) parsePrimary() ast.Expression {
 	pos := ast.Position{Line: p.curToken.Line, Column: p.curToken.Column}
 
 	switch p.curToken.Type {

@@ -1012,6 +1012,17 @@ func (e *Evaluator) evalBinaryExpr(expr *ast.BinaryExpr) interface{} {
 	right := e.evalExpr(expr.Right)
 
 	switch expr.Operator {
+	case "+":
+		// String concatenation: any type coerced to string; nil becomes ""
+		leftStr := ""
+		if left != nil {
+			leftStr = fmt.Sprintf("%v", left)
+		}
+		rightStr := ""
+		if right != nil {
+			rightStr = fmt.Sprintf("%v", right)
+		}
+		return leftStr + rightStr
 	case "==":
 		return e.compareValues(left, right) == 0
 	case "!=":

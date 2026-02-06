@@ -70,6 +70,9 @@ const (
 	LT    // <
 	GTE   // >=
 	LTE   // <=
+
+	// String concatenation
+	PLUS  // +
 )
 
 var tokenNames = map[TokenType]string{
@@ -123,6 +126,7 @@ var tokenNames = map[TokenType]string{
 	LT:          "LT",
 	GTE:         "GTE",
 	LTE:         "LTE",
+	PLUS:        "PLUS",
 }
 
 func (t TokenType) String() string {
@@ -331,6 +335,11 @@ func (l *Lexer) NextToken() Token {
 			tok.Literal = "<"
 			l.readChar()
 		}
+
+	case '+':
+		tok.Type = PLUS
+		tok.Literal = "+"
+		l.readChar()
 
 	case '"':
 		tok.Type = STRING
