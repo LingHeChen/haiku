@@ -2,6 +2,8 @@
 
 A minimalist HTTP client that lets you write less and do more.
 
+> [English](README.md) | [中文](README_ZH.md)
+
 ## Features
 
 - **Indentation-based body** - No more `{}`, `,`, or `"` noise
